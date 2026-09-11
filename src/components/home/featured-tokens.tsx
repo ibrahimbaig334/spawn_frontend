@@ -1,22 +1,15 @@
 import Link from "next/link";
 import { createSeedState } from "@/data/mock-seed";
-import { selectLaunches, selectTokenSummary } from "@/domain/selectors";
-import { formatBasisPoints, formatEth } from "@/lib/format";
-
-const STAGES = {
-  launch: "Initial market phase",
-  milestones: "Milestone phase",
-  "core-complete": "Core schedule complete",
-} as const;
+import {
+  deriveFdvEth,
+  derivePhaseLabel,
+  selectLaunches,
+} from "@/domain/selectors";
+import { formatEth } from "@/lib/format";
 
 export function FeaturedTokens() {
   const state = createSeedState();
-  const summaries = selectLaunches(state)
-    .slice(0, 3)
-    .flatMap((launch) => {
-      const summary = selectTokenSummary(state, launch);
-      return summary ? [summary] : [];
-    });
+  const launches = selectLaunches(state).slice(0, 3);
 
   return (
     <section
@@ -26,7 +19,7 @@ export function FeaturedTokens() {
       <div className="grid grid-cols-[minmax(18rem,1fr)_minmax(16rem,.55fr)_auto] items-end gap-x-[clamp(2rem,5vw,5rem)] gap-y-6 pb-8 max-[64rem]:grid-cols-2 max-[42rem]:grid-cols-1">
         <div>
           <p className="m-0 font-mono text-xs font-bold tracking-[0.08em] text-accent uppercase">
-            Featured demonstration tokens
+            Featured simulated tokens
           </p>
           <h2
             className="mt-2 mb-0 max-w-[15ch] text-[clamp(2rem,4.5vw,4.25rem)] leading-[0.97] tracking-[-0.045em]"
@@ -36,21 +29,21 @@ export function FeaturedTokens() {
           </h2>
         </div>
         <p className="m-0 text-ink-muted">
-          Fixed fixtures illustrate distinct stages of the same intended
-          protocol mechanics. They are not market observations.
+          Deterministic fixtures illustrate distinct lifecycle stages of the
+          same protocol mechanics. They are not market observations.
         </p>
         <Link
           className="min-h-target whitespace-nowrap font-bold underline decoration-[0.1em] underline-offset-4 max-[64rem]:col-start-1 max-[42rem]:col-auto"
           href="/tokens"
         >
-          View all demo tokens
+          View all tokens
         </Link>
       </div>
       <div className="border-t-2 border-ink">
-        {summaries.map(({ launch, creator, feeBps }) => (
+        {launches.map((launch) => (
           <article
             className="grid min-w-0 grid-cols-[minmax(15rem,.8fr)_minmax(24rem,1.4fr)_auto] items-center gap-x-8 gap-y-4 border-b border-rule py-5 max-[64rem]:grid-cols-[1fr_auto] max-[42rem]:grid-cols-1"
-            key={launch.id}
+            key={launch.poolId}
           >
             <div className="flex min-w-0 items-center gap-3.5">
               <span
@@ -69,32 +62,26 @@ export function FeaturedTokens() {
                   </Link>
                 </h3>
                 <p className="mt-1 mb-0 text-xs text-ink-muted">
-                  ${launch.symbol} · by{" "}
-                  <Link href={`/profiles/${creator.slug}`}>
-                    {creator.displayName}
-                  </Link>
+                  ${launch.symbol} · ${launch.token}
                 </p>
               </div>
             </div>
             <dl className="m-0 grid grid-cols-4 max-[64rem]:col-span-full max-[64rem]:row-start-2 max-[42rem]:col-auto max-[42rem]:row-auto max-[42rem]:grid-cols-2 [&>div]:min-w-0 [&>div]:px-3 max-[42rem]:[&>div]:py-2.5 max-[42rem]:[&>div]:px-0 [&>div+div]:border-l [&>div+div]:border-rule max-[42rem]:[&>div+div]:border-l-0 max-[42rem]:[&>div:nth-child(even)]:border-l max-[42rem]:[&>div:nth-child(even)]:pl-3 [&_dt]:text-[0.68rem] [&_dt]:text-ink-muted [&_dd]:mt-1 [&_dd]:mb-0 [&_dd]:overflow-wrap-anywhere [&_dd]:font-mono [&_dd]:text-xs [&_dd]:font-semibold">
               <div>
-                <dt>Stage</dt>
-                <dd>{STAGES[launch.stage]}</dd>
+                <dt>Phase</dt>
+                <dd>{derivePhaseLabel(launch)}</dd>
               </div>
               <div>
-                <dt>Demo valuation</dt>
-                <dd>{formatEth(launch.valuationEth, 0)}</dd>
+                <dt>FDV</dt>
+                <dd>{formatEth(deriveFdvEth(launch), 0)}</dd>
               </div>
               <div>
-                <dt>Completed</dt>
-                <dd>
-                  {launch.completedMilestones + launch.additionalMilestones}{" "}
-                  milestones
-                </dd>
+                <dt>Harvested</dt>
+                <dd>{launch.completedMilestones} milestones</dd>
               </div>
               <div>
-                <dt>Current fee</dt>
-                <dd>{formatBasisPoints(feeBps)}</dd>
+                <dt>Fee</dt>
+                <dd>1% static</dd>
               </div>
             </dl>
             <Link

@@ -1,28 +1,38 @@
 const questions = [
   {
-    question: "What happens if a launch does not progress?",
+    question: "Can I provide liquidity to a Spawn pool?",
     answer:
-      "The current concept has no deadline, minimum raise, cancellation path, or refund mechanism. Trading may continue without reaching the next milestone.",
+      "No. The hook rejects every third-party deposit and withdrawal — the pool's liquidity (curve, then full-range plus ladder) is protocol-owned by design. Trading is the only pool interaction.",
   },
   {
-    question: "Are milestones beyond the first 30 guaranteed?",
+    question: "When exactly does graduation happen?",
     answer:
-      "No. Any additional milestones depend on enough token-denominated trading fees being collected. They are conditional and may never become available.",
+      "When the live level reaches the curve top (2x the opening valuation), evaluated at call time: the next buy auto-graduates, or anyone can call graduate() deliberately. Touching the top and falling back does not graduate the pool.",
   },
   {
-    question: "Is a creator purchase locked?",
+    question: "What does a milestone actually pay?",
     answer:
-      "Not necessarily. A creator purchase is optional and disclosed, but may state No lock-up. It is a purchase, not a free allocation.",
+      "When a swap crosses a band's top, that band's tokens are sold into the pump: 10% service fee to the protocol, 90% funding the payout pot. The pot is flushed to the launch's plugins and the creator's revenue path — anyone can flush it and earn a 1% tip.",
+  },
+  {
+    question: "My launch shows a band was bypassed — is something broken?",
+    answer:
+      "No. If the price outruns a band before it can deploy, the band is skipped and its tokens roll into the next rung. It is a specified outcome, not a failure.",
+  },
+  {
+    question: "Can a relayer steal or alter my launch?",
+    answer:
+      "No. The signature covers every configuration field; any edit changes the digest and the protocol reverts with CreatorMismatch. A relayer also cannot trigger a dev buy on your behalf — relayed launches simply skip it.",
   },
   {
     question: "Does reaching a milestone prove lasting demand?",
     answer:
-      "No. Markets can be manipulated, and temporary price moves may trigger modeled outcomes before reversing. A reached target is not proof of durable value.",
+      "No. Markets can reverse, and a band harvested at its top may be the last. A reached target is not proof of durable value.",
   },
   {
-    question: "Has the system been audited or deployed?",
+    question: "Is the protocol deployed?",
     answer:
-      "No such claim is made. This interface presents a product concept with local demonstration data; it does not establish an audit, a live deployment, or transaction readiness.",
+      "Deployments exist on testnet; addresses come only from the deployment manifest for the chain you are on. This interface runs a local protocol simulation — no wallet, asset, or transaction is connected.",
   },
 ] as const;
 
@@ -41,10 +51,10 @@ export function RiskFaq() {
           className="m-0 max-w-[14ch] text-[clamp(2.1rem,5vw,4.6rem)] leading-[0.96] tracking-[-0.05em]"
           id="risks-title"
         >
-          Know what the model does not promise.
+          Know what the protocol does not promise.
         </h2>
         <p className="mt-1 mb-0 text-ink-muted">
-          These constraints are part of the concept, not edge-case fine print.
+          These constraints are part of the design, not edge-case fine print.
         </p>
       </div>
       <div className="border-t-2 border-ink pb-[clamp(4rem,8vw,7rem)]">

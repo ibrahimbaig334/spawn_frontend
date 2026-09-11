@@ -1,31 +1,28 @@
 import type { Metadata } from "next";
 import { TokenDetailPage } from "@/components/tokens/token-detail-page";
-import { SEED_LAUNCHES } from "@/data/mock-seed";
+import { SEED_LAUNCH_SLUGS } from "@/data/mock-seed";
 
 interface TokenPageProps {
   params: Promise<{ slug: string }>;
 }
 
 export function generateStaticParams() {
-  return Object.values(SEED_LAUNCHES).map(({ slug }) => ({ slug }));
+  return SEED_LAUNCH_SLUGS.map((slug) => ({ slug }));
 }
 
 export async function generateMetadata({
   params,
 }: TokenPageProps): Promise<Metadata> {
   const { slug } = await params;
-  const launch = Object.values(SEED_LAUNCHES).find(
-    (candidate) => candidate.slug === slug,
-  );
-  if (!launch)
+  const name = slug.split("-").slice(0, -1).join(" ") || "Token";
+  if (!SEED_LAUNCH_SLUGS.includes(slug))
     return {
-      title: "Demo token",
-      description:
-        "Inspect a fixed or browser-local Spawn demonstration token.",
+      title: "Token",
+      description: "Inspect a simulated Spawn launch.",
     };
   return {
-    title: `${launch.name} (${launch.symbol})`,
-    description: `Inspect ${launch.name}'s demonstration price history, public milestones, proceeds allocation, comments, activity, and trade simulation.`,
+    title: name,
+    description: `Inspect ${name}'s level, milestone ladder, payout pot, claims, and trade simulation.`,
   };
 }
 

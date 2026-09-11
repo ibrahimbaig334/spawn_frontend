@@ -1,15 +1,15 @@
 const steps = [
   {
-    title: "Publish the terms",
-    body: "A launch begins with one visible supply schedule, an opening total-supply valuation, and a declared proceeds allocation.",
+    title: "Launch on the curve",
+    body: "One pool per launch opens at the 125 ETH template FDV. The signed configuration — supply, payout plan, optional dev buy — is immutable the moment it lands, and the token address was knowable before the signature.",
   },
   {
-    title: "Let activity set the pace",
-    body: "Modeled token activity begins before milestone funding. Progress depends on reaching each public price target in sequence.",
+    title: "Graduate at 2x",
+    body: "When the level reaches the curve top, the pool graduates: curve liquidity burns, proceeds split 40% locked LP / 55% creator / 5% protocol, and a code-locked full-range position takes over.",
   },
   {
-    title: "Resolve what is reached",
-    body: "When a target is reached, its modeled allocation follows the split selected at launch. Unreached targets remain unresolved.",
+    title: "Climb the milestone ladder",
+    body: "30 protocol-owned sell bands at 1.2504x rungs stand above graduation. Every crossed band is harvested into the payout pot — 10% service fee, 90% to the pot — and flushed to the launch's selected plugins and the creator path.",
   },
 ] as const;
 
@@ -28,11 +28,11 @@ export function HowItWorks() {
           className="m-0 max-w-[14ch] text-[clamp(2.1rem,5vw,4.6rem)] leading-[0.96] tracking-[-0.05em]"
           id="how-it-works-title"
         >
-          One sequence. Terms declared up front.
+          Three phases. One pool.
         </h2>
         <p className="mt-1 mb-0 text-ink-muted">
-          The concept separates market participation from milestone allocation
-          while keeping both readable in one public schedule.
+          A launch is one pool that morphs in place — no factory, no migration.
+          Price climbs in level space; every user-facing number is a level.
         </p>
       </div>
       <ol className="m-0 list-none border-t-2 border-ink pb-[clamp(4rem,8vw,7rem)] p-0">

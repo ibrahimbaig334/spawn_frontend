@@ -1,27 +1,22 @@
 export const DEMO_DISCLOSURE =
-  "Fixed demonstration data. Values and interactions are stored in this browser. No wallet, contract, market feed, or transaction is connected.";
+  "Local protocol simulation. Values and interactions are stored in this browser. No wallet, contract, market feed, or transaction is connected.";
 
 export const PRODUCT_COPY = {
-  heroEyebrow: "Spawn / milestone launch protocol concept",
+  heroEyebrow: "Spawn / milestone launch protocol",
   heroTitle: "Public terms before market momentum.",
   heroBody:
-    "Spawn models token launches where activity advances a disclosed sequence of public price targets and each reached milestone resolves through terms set at launch.",
-  heroExplore: "Explore demo tokens",
-  creatorCta: "Build a demo launch",
-  sectionHow: "A launch that proves its terms before it asks for attention.",
-  sectionExplore: "Inspect the market and the terms in one place.",
-  sectionCreate: "Set the split once. Make it public.",
-  closingTitle: "Launch on public terms. Progress milestone by milestone.",
-  heroPrimary: "Explore demo tokens",
-  heroReset: "Reset demonstration",
+    "Spawn launches tokens on a bonding curve that graduates into a protocol-owned milestone ladder — every crossed band pays the creator, the selected payout plugins, and the protocol, on terms signed at launch.",
+  heroExplore: "Explore simulated tokens",
+  creatorCta: "Build a launch",
+  sectionHow: "One pool. Three phases. Terms signed up front.",
+  closingTitle: "Launch on public terms. Climb band by band.",
 } as const;
 
 export const UI_GLOSSARY = {
-  valuation: "Total-supply valuation",
-  launchPhase: "Initial market phase",
-  completion: "Completed allocation",
-  creatorPurchase: "Creator purchase",
-  removal: "Token buyback and removal",
-  ongoingTrading: "Trading liquidity",
-  creatorRight: "Creator earnings right",
+  level: "Level (−tick) — the protocol's price coordinate",
+  fdv: "Total supply × 1.0001^level",
+  payoutPot: "Net milestone proceeds awaiting a flush",
+  flush: "Permissionless pot delivery; the flusher earns a 1% tip",
+  creatorPath: "The creator's mandatory remainder of every pot",
+  revenueNft: "The transferable claim right to creator revenue",
 } as const;

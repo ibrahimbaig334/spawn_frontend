@@ -1,4 +1,4 @@
-import { PROTOCOL_TERMS } from "@/data/protocol-terms";
+import { CORE_BAND_COUNT } from "@/protocol/constants";
 
 export interface MilestoneOverviewProps {
   completedMilestones: number;
@@ -8,10 +8,10 @@ export interface MilestoneOverviewProps {
 }
 
 const MILESTONES = Array.from(
-  { length: PROTOCOL_TERMS.coreMilestones },
+  { length: CORE_BAND_COUNT },
   (_, index) => index + 1,
 );
-const LANDMARKS = [1, 8, 16, 24, PROTOCOL_TERMS.coreMilestones] as const;
+const LANDMARKS = [1, 8, 16, 24, CORE_BAND_COUNT] as const;
 
 function clamp(value: number, minimum: number, maximum: number): number {
   if (!Number.isFinite(value)) return minimum;
@@ -21,22 +21,20 @@ function clamp(value: number, minimum: number, maximum: number): number {
 export function MilestoneOverview({
   completedMilestones,
   progressBps = 0,
-  title = "Core milestone overview",
+  title = "Milestone ladder overview",
   className,
 }: MilestoneOverviewProps) {
-  const completed = Math.floor(
-    clamp(completedMilestones, 0, PROTOCOL_TERMS.coreMilestones),
-  );
+  const completed = Math.floor(clamp(completedMilestones, 0, CORE_BAND_COUNT));
   const partial =
-    completed === PROTOCOL_TERMS.coreMilestones
+    completed === CORE_BAND_COUNT
       ? 0
       : clamp(progressBps, 0, 10_000) / 10_000;
-  const next = Math.min(completed + 1, PROTOCOL_TERMS.coreMilestones);
+  const next = Math.min(completed + 1, CORE_BAND_COUNT);
   const progressValue = completed + partial;
   const summary =
-    completed === PROTOCOL_TERMS.coreMilestones
-      ? `All ${PROTOCOL_TERMS.coreMilestones} core milestones completed`
-      : `${completed} of ${PROTOCOL_TERMS.coreMilestones} core milestones completed. Milestone ${next} is next.`;
+    completed === CORE_BAND_COUNT
+      ? `All ${CORE_BAND_COUNT} core bands harvested`
+      : `${completed} of ${CORE_BAND_COUNT} bands harvested. Band ${next} is next.`;
 
   return (
     <figure
@@ -49,7 +47,7 @@ export function MilestoneOverview({
           {title}
         </span>
         <strong className="tabular-nums text-lg">
-          {completed} / {PROTOCOL_TERMS.coreMilestones}
+          {completed} / {CORE_BAND_COUNT}
         </strong>
         <span className="col-span-full text-sm leading-[1.4] text-ink-muted">
           {summary}
@@ -59,7 +57,7 @@ export function MilestoneOverview({
       <progress
         aria-label={title}
         className="absolute -left-[10000px] size-px overflow-hidden"
-        max={PROTOCOL_TERMS.coreMilestones}
+        max={CORE_BAND_COUNT}
         value={progressValue}
       >
         {summary}
@@ -96,21 +94,22 @@ export function MilestoneOverview({
         className="mt-2.5 flex list-none justify-between p-0 text-[0.6875rem] [&_li]:grid [&_li]:gap-0.5 [&_li:not(:first-child):not(:last-child)]:text-center [&_li:last-child]:text-right max-[34rem]:[&_li:nth-child(2)]:hidden max-[34rem]:[&_li:nth-child(4)]:hidden"
         aria-label="Milestone landmarks"
       >
-        {LANDMARKS.map((number) => {
-          const feeTier = PROTOCOL_TERMS.feeTiers.find(
-            (tier) => tier.completedMilestones === number,
-          );
-          return (
-            <li key={number}>
-              <span className="font-bold">Milestone {number}</span>
-              {feeTier ? (
-                <small className="text-inherit text-ink-muted">
-                  {feeTier.label} fee
-                </small>
-              ) : null}
-            </li>
-          );
-        })}
+        {LANDMARKS.map((number) => (
+          <li key={number}>
+            <span className="font-bold">Band {number}</span>
+            <small className="text-inherit text-ink-muted">
+              {number === 1
+                ? "1.25x"
+                : number === 8
+                  ? "5x"
+                  : number === 16
+                    ? "36x"
+                    : number === 24
+                      ? "265x"
+                      : "800x"}
+            </small>
+          </li>
+        ))}
       </ol>
     </figure>
   );

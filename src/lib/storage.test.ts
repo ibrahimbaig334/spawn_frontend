@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createSeedData, createSeedState } from "@/data/mock-seed";
+import { createSeedState } from "@/data/mock-seed";
 import {
   clearDemoState,
   DEMO_STORAGE_KEY,
@@ -22,34 +22,39 @@ function memoryStorage() {
 }
 
 describe("demo storage", () => {
-  it("round-trips persisted V2 data without runtime fields", () => {
+  it("round-trips persisted V3 protocol data without runtime fields", () => {
     const storage = memoryStorage();
-    const data = createSeedData();
+    const data = createSeedState().data;
     expect(saveDemoState(data, storage)).toBe(true);
     const raw = storage.getItem(DEMO_STORAGE_KEY);
-    expect(raw).toContain('"version":2');
+    expect(raw).toContain('"version":3');
     expect(raw).not.toContain('"runtime"');
     expect(loadDemoState(storage)).toEqual(data);
   });
 
-  it("rejects malformed, unsupported, and structurally invalid versions", () => {
+  it("rejects malformed and structurally invalid versions", () => {
     expect(parseStoredDemoState("{")).toBeNull();
+    const seed = createSeedState().data;
     expect(
-      parseStoredDemoState(JSON.stringify({ ...createSeedData(), version: 3 })),
+      parseStoredDemoState(JSON.stringify({ ...seed, version: 2 })),
     ).toBeNull();
     expect(
       parseStoredDemoState(
         JSON.stringify({
-          ...createSeedData(),
-          portfolio: { ...createSeedData().portfolio, ethBalance: 25 },
+          ...seed,
+          portfolio: { ...seed.portfolio, ethBalance: 25 },
         }),
       ),
     ).toBeNull();
   });
 
+  it("rejects legacy V2 payloads (shape no longer supported)", () => {
+    expect(parseStoredDemoState(JSON.stringify({ version: 2 }))).toBeNull();
+  });
+
   it("clears its versioned storage key", () => {
     const storage = memoryStorage();
-    saveDemoState(createSeedData(), storage);
+    saveDemoState(createSeedState().data, storage);
     expect(clearDemoState(storage)).toBe(true);
     expect(storage.getItem(DEMO_STORAGE_KEY)).toBeNull();
   });

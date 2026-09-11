@@ -56,20 +56,20 @@ export function PortfolioOverview() {
       <dl className="mt-6 grid grid-cols-4 border-y-2 border-ink max-[62rem]:grid-cols-2 max-[42rem]:grid-cols-1 [&>div]:min-w-0 [&>div]:p-4 [&>div+div]:border-l [&>div+div]:border-rule max-[62rem]:[&>div:nth-child(3)]:border-l-0 max-[62rem]:[&>div:nth-child(n+3)]:border-t max-[42rem]:[&>div+div]:border-t max-[42rem]:[&>div+div]:border-l-0 [&_dt]:text-xs [&_dt]:text-ink-muted [&_dd]:mt-2 [&_dd]:mb-0 [&_dd]:overflow-wrap-anywhere [&_dd]:font-mono [&_dd]:text-[clamp(1rem,2vw,1.35rem)] [&_dd]:font-bold [&_dd[data-polarity=positive]]:text-accent-strong [&_dd[data-polarity=negative]]:text-error">
         <div>
           <dt>Available demo ETH</dt>
-          <dd>{formatEth(totals.ethBalance, 4)}</dd>
+          <dd>{formatEth(totals.ethBalance, 2)}</dd>
         </div>
         <div>
           <dt>Estimated demo value</dt>
-          <dd>{formatEth(totals.estimatedValueEth, 4)}</dd>
+          <dd>{formatEth(totals.estimatedValueEth, 2)}</dd>
         </div>
         <div>
           <dt>Average-cost basis</dt>
-          <dd>{formatEth(totals.costBasisEth, 4)}</dd>
+          <dd>{formatEth(totals.costBasisEth, 2)}</dd>
         </div>
         <div>
           <dt>Total demo P&amp;L</dt>
           <dd data-polarity={polarity(totals.totalPnlEth)}>
-            {formatEth(totals.totalPnlEth, 4)}
+            {formatEth(totals.totalPnlEth, 2)}
           </dd>
         </div>
       </dl>
@@ -91,7 +91,7 @@ export function PortfolioOverview() {
             {totals.positions.map((position) => (
               <article
                 className="grid grid-cols-[minmax(12rem,.55fr)_minmax(30rem,1.5fr)] items-center gap-x-8 gap-y-6 border-b border-rule py-5 break-inside-avoid max-[62rem]:grid-cols-1"
-                key={position.launch.id}
+                key={position.launch.poolId}
               >
                 <div>
                   <p className="m-0 text-xs text-ink-muted">
@@ -105,7 +105,7 @@ export function PortfolioOverview() {
                   <span className="text-xs text-ink-muted">
                     {position.tokenQuantity === "0"
                       ? "Closed position"
-                      : "Demo holding"}
+                      : "Simulated holding"}
                   </span>
                 </div>
                 <dl className="m-0 grid grid-cols-3 gap-px bg-rule max-[42rem]:grid-cols-2 max-[28rem]:grid-cols-1 [&>div]:min-w-0 [&>div]:bg-raised [&>div]:px-3 [&>div]:py-2 [&_dt]:text-xs [&_dt]:text-ink-muted [&_dd]:mt-1 [&_dd]:mb-0 [&_dd]:overflow-wrap-anywhere [&_dd]:font-mono [&_dd]:text-xs [&_dd]:font-bold [&_dd[data-polarity=positive]]:text-accent-strong [&_dd[data-polarity=negative]]:text-error">
@@ -121,26 +121,26 @@ export function PortfolioOverview() {
                   </div>
                   <div>
                     <dt>Average cost</dt>
-                    <dd>{formatEth(position.averageCostEth, 8)}</dd>
+                    <dd>{formatEth(position.averageCostEth, 2)}</dd>
                   </div>
                   <div>
                     <dt>Remaining basis</dt>
-                    <dd>{formatEth(position.remainingCostBasisEth, 4)}</dd>
+                    <dd>{formatEth(position.remainingCostBasisEth, 2)}</dd>
                   </div>
                   <div>
                     <dt>Estimated value</dt>
-                    <dd>{formatEth(position.estimatedValueEth, 4)}</dd>
+                    <dd>{formatEth(position.estimatedValueEth, 2)}</dd>
                   </div>
                   <div>
                     <dt>Realized P&amp;L</dt>
                     <dd data-polarity={polarity(position.realizedPnlEth)}>
-                      {formatEth(position.realizedPnlEth, 4)}
+                      {formatEth(position.realizedPnlEth, 2)}
                     </dd>
                   </div>
                   <div>
                     <dt>Unrealized P&amp;L</dt>
                     <dd data-polarity={polarity(position.unrealizedPnlEth)}>
-                      {formatEth(position.unrealizedPnlEth, 4)}
+                      {formatEth(position.unrealizedPnlEth, 2)}
                     </dd>
                   </div>
                 </dl>

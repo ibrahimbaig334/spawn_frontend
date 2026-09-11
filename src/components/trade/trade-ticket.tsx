@@ -2,12 +2,13 @@
 
 import { useRef, useState } from "react";
 import { useDemo } from "@/state/use-demo";
-import { selectTokenBalance } from "@/domain/selectors";
+import { selectEthBalance, selectTokenBalance } from "@/domain/selectors";
 import { Dialog } from "@/components/ui/dialog";
-import type { Launch, TradePreview, TradeSide } from "@/types/launch";
+import type { LaunchRecord, TradePreview, TradeSide } from "@/services/launchpad-client";
+import { deriveGraduationNext, derivePhaseLabel } from "@/domain/selectors";
 
 interface TradeTicketProps {
-  launch: Launch;
+  launch: LaunchRecord;
 }
 type Phase = "idle" | "previewing" | "ready" | "submitting" | "success";
 const BUTTON =
@@ -18,7 +19,7 @@ const GRID =
 export function TradeTicket({ launch }: TradeTicketProps) {
   const { state, dispatch, client } = useDemo();
   const [side, setSide] = useState<TradeSide>("buy");
-  const [amounts, setAmounts] = useState({ buy: "1", sell: "1" });
+  const [amounts, setAmounts] = useState({ buy: "1", sell: "100" });
   const [preview, setPreview] = useState<TradePreview | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState("");
@@ -26,9 +27,11 @@ export function TradeTicket({ launch }: TradeTicketProps) {
   const [receipt, setReceipt] = useState("");
   const submitLock = useRef(false);
   const confirmRef = useRef<HTMLButtonElement>(null);
-  const tokenBalance = selectTokenBalance(state, launch.id);
-  const context = { ethBalance: state.data.portfolio.ethBalance, tokenBalance };
+  const ethBalance = selectEthBalance(state);
+  const tokenBalance = selectTokenBalance(state, launch.poolId);
   const amount = amounts[side];
+  const graduationNext = deriveGraduationNext(launch);
+  const phaseLabel = derivePhaseLabel(launch);
 
   async function updatePreview(
     nextSide = side,
@@ -40,11 +43,10 @@ export function TradeTicket({ launch }: TradeTicketProps) {
     setReceipt("");
     setPhase("previewing");
     try {
-      const value = await client.previewTrade(
-        launch,
-        { side: nextSide, amount: nextAmount },
-        context,
-      );
+      const value = await client.previewTrade(launch, {
+        side: nextSide,
+        amount: nextAmount,
+      });
       setPreview(value);
       setPhase("ready");
     } catch (reason) {
@@ -52,7 +54,7 @@ export function TradeTicket({ launch }: TradeTicketProps) {
       setError(
         reason instanceof Error
           ? reason.message
-          : "A preview could not be prepared.",
+          : "A quote could not be prepared.",
       );
       setPhase("idle");
     }
@@ -65,12 +67,14 @@ export function TradeTicket({ launch }: TradeTicketProps) {
     setReceipt("");
     setError("");
   }
+
   function setBalanceShortcut() {
     void updatePreview(
       side,
-      side === "buy" ? context.ethBalance : context.tokenBalance,
+      side === "buy" ? ethBalance : tokenBalance,
     );
   }
+
   async function submit() {
     if (!preview || submitLock.current) return;
     submitLock.current = true;
@@ -80,11 +84,17 @@ export function TradeTicket({ launch }: TradeTicketProps) {
       const result = await client.executeTrade(
         launch,
         { side, amount },
-        context,
         state.data.sequence + 1,
       );
-      dispatch({ type: "apply-trade", result });
-      setReceipt(result.receiptId);
+      const receiptId = `sim_${launch.poolId}_${state.data.sequence + 1}`;
+      dispatch({
+        type: "apply-launch-update",
+        launch: result.launch,
+        events: result.events,
+        tokenBalance: result.tokenBalance,
+        ethBalance: result.ethBalance,
+      });
+      setReceipt(receiptId);
       setPhase("success");
       setDialogOpen(false);
       setPreview(null);
@@ -92,7 +102,7 @@ export function TradeTicket({ launch }: TradeTicketProps) {
       setError(
         reason instanceof Error
           ? reason.message
-          : "The demo submission could not be completed.",
+          : "The trade could not be completed.",
       );
       setPhase("ready");
     } finally {
@@ -103,20 +113,30 @@ export function TradeTicket({ launch }: TradeTicketProps) {
   return (
     <section
       className="mt-4 border-y-2 border-ink py-5 text-ink"
-      aria-labelledby={`trade-${launch.id}`}
+      aria-labelledby={`trade-${launch.poolId}`}
     >
       <header className="flex items-baseline justify-between gap-4 max-[25rem]:items-start max-[25rem]:flex-col">
-        <h4 className="m-0 text-xl" id={`trade-${launch.id}`}>
-          Trade simulation
+        <h4 className="m-0 text-xl" id={`trade-${launch.poolId}`}>
+          Trade
         </h4>
         <span className="font-mono text-[0.68rem] font-bold tracking-[0.07em] text-ink-muted uppercase">
-          Demo data · No transaction
+          {phaseLabel} · 1% fee
         </span>
       </header>
+      {graduationNext && (
+        <p
+          className="mt-3 mb-0 border-l-[3px] border-accent bg-raised px-3 py-2 text-sm"
+          role="status"
+        >
+          <strong>Graduation on next trade.</strong> The curve top (2x the
+          opening valuation) is at hand — the next buy auto-graduates the pool:
+          curve burns, 40/55/5 splits, and the milestone ladder loads.
+        </p>
+      )}
       <div
         className="mt-4 flex [&_button+button]:border-l-0 [&_button[aria-pressed=true]]:border-ink [&_button[aria-pressed=true]]:bg-ink [&_button[aria-pressed=true]]:text-inverse"
         role="group"
-        aria-label="Demo trade direction"
+        aria-label="Trade direction"
       >
         <button
           className={BUTTON}
@@ -137,7 +157,7 @@ export function TradeTicket({ launch }: TradeTicketProps) {
       </div>
       <label className="mt-4 grid gap-1.5">
         <span className="text-sm font-bold">
-          Simulation input, {side === "buy" ? "ETH" : launch.symbol}
+          Amount, {side === "buy" ? "ETH" : launch.symbol}
         </span>
         <input
           className="min-h-target w-full border border-rule bg-raised px-3 py-2.5 text-ink"
@@ -153,14 +173,14 @@ export function TradeTicket({ launch }: TradeTicketProps) {
             setReceipt("");
           }}
           onBlur={() => void updatePreview()}
-          aria-describedby={`trade-note-${launch.id}`}
+          aria-describedby={`trade-note-${launch.poolId}`}
         />
       </label>
       <div className="mt-2 flex items-center justify-between gap-3 text-xs text-ink-muted">
         <span>
           {side === "buy"
-            ? `Demo balance: ${context.ethBalance} ETH`
-            : `Token balance: ${context.tokenBalance} ${launch.symbol}`}
+            ? `Balance: ${Number(ethBalance).toFixed(4)} ETH`
+            : `Balance: ${Number(tokenBalance).toFixed(2)} ${launch.symbol}`}
         </span>
         <button
           className="cursor-pointer border-0 bg-transparent p-1 font-bold text-ink underline underline-offset-4"
@@ -172,10 +192,10 @@ export function TradeTicket({ launch }: TradeTicketProps) {
       </div>
       <p
         className="mt-4 mb-0 border-l-4 border-focus bg-paper p-3 leading-snug"
-        id={`trade-note-${launch.id}`}
+        id={`trade-note-${launch.poolId}`}
       >
-        Simulation only. Estimates use deterministic demo data and do not quote
-        or send a transaction.
+        Simulation only. Buys pay the 1% fee in ETH, sells in token. Quotes are
+        single-swap — re-quote on errors rather than padding.
       </p>
       {error && (
         <p className="mt-3 mb-0 font-bold text-error" role="alert">
@@ -188,23 +208,23 @@ export function TradeTicket({ launch }: TradeTicketProps) {
             <div>
               <dt>Estimated output</dt>
               <dd>
-                {preview.estimatedOutput}{" "}
+                {Number(preview.estimatedOutput).toFixed(2)}{" "}
                 {preview.outputUnit === "token" ? launch.symbol : "ETH"}
               </dd>
             </div>
             <div>
-              <dt>Simulation fee</dt>
+              <dt>Fee (1%, {preview.feeUnit === "ETH" ? "ETH" : "token"})</dt>
+              <dd>{Number(preview.feeAmount).toFixed(2)}</dd>
+            </div>
+            <div>
+              <dt>Level movement</dt>
               <dd>
-                {preview.feeEth} ETH ({preview.feeBps / 100}%)
+                {preview.levelBefore} → {preview.levelAfter}
               </dd>
             </div>
             <div>
-              <dt>Progress after</dt>
-              <dd>{preview.afterProgressBps / 100}%</dd>
-            </div>
-            <div>
-              <dt>Targets reached</dt>
-              <dd>{preview.newlyCompleted}</dd>
+              <dt>Milestones completed</dt>
+              <dd>{preview.milestonesCompleted}</dd>
             </div>
           </dl>
         </div>
@@ -216,17 +236,17 @@ export function TradeTicket({ launch }: TradeTicketProps) {
         onClick={() => (preview ? setDialogOpen(true) : void updatePreview())}
       >
         {phase === "previewing"
-          ? "Updating preview…"
+          ? "Quoting…"
           : preview
-            ? "Review simulation"
-            : "Prepare simulation"}
+            ? "Review trade"
+            : "Get quote"}
       </button>
       {receipt && (
         <p
           className="mt-4 mb-0 border-l-4 border-focus bg-paper p-3 leading-snug"
           role="status"
         >
-          <strong>Demo result recorded.</strong>
+          <strong>Trade recorded.</strong>
           <br />
           Receipt {receipt}. No transaction occurred.
         </p>
@@ -237,8 +257,8 @@ export function TradeTicket({ launch }: TradeTicketProps) {
         onClose={() => {
           if (phase !== "submitting") setDialogOpen(false);
         }}
-        title={`Review demo ${side}`}
-        description="This records a deterministic result in browser-local demo data. No transaction will be created."
+        title={`Review ${side}`}
+        description="Records a deterministic result in the local protocol simulation. No transaction will be created."
         initialFocusRef={confirmRef}
         footer={
           <div className="flex w-full justify-end gap-2 max-[25rem]:items-stretch max-[25rem]:flex-col-reverse">
@@ -257,7 +277,7 @@ export function TradeTicket({ launch }: TradeTicketProps) {
               disabled={phase === "submitting"}
               onClick={() => void submit()}
             >
-              {phase === "submitting" ? "Recording…" : "Record demo result"}
+              {phase === "submitting" ? "Submitting…" : "Confirm trade"}
             </button>
           </div>
         }
@@ -267,27 +287,27 @@ export function TradeTicket({ launch }: TradeTicketProps) {
             <div>
               <dt>Input</dt>
               <dd>
-                {preview.inputAmount}{" "}
+                {Number(preview.inputAmount).toFixed(2)}{" "}
                 {preview.inputUnit === "token" ? launch.symbol : "ETH"}
               </dd>
             </div>
             <div>
               <dt>Estimated output</dt>
               <dd>
-                {preview.estimatedOutput}{" "}
+                {Number(preview.estimatedOutput).toFixed(2)}{" "}
                 {preview.outputUnit === "token" ? launch.symbol : "ETH"}
               </dd>
             </div>
             <div>
-              <dt>Progress</dt>
+              <dt>Fee</dt>
               <dd>
-                {preview.beforeProgressBps / 100}% →{" "}
-                {preview.afterProgressBps / 100}%
+                {Number(preview.feeAmount).toFixed(2)}{" "}
+                {preview.feeUnit === "ETH" ? "ETH" : launch.symbol}
               </dd>
             </div>
             <div>
-              <dt>Targets reached</dt>
-              <dd>{preview.newlyCompleted}</dd>
+              <dt>Milestones completed</dt>
+              <dd>{preview.milestonesCompleted}</dd>
             </div>
           </dl>
         )}

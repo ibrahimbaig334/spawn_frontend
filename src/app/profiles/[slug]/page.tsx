@@ -7,27 +7,23 @@ interface ProfileRouteProps {
 }
 
 export function generateStaticParams() {
-  return Object.values(SEED_PROFILES)
-    .filter(({ kind }) => kind === "fictional-demo")
-    .map(({ slug }) => ({ slug }));
+  return SEED_PROFILES.map(({ slug }) => ({ slug }));
 }
 
 export async function generateMetadata({
   params,
 }: ProfileRouteProps): Promise<Metadata> {
   const { slug } = await params;
-  const profile = Object.values(SEED_PROFILES).find(
-    (candidate) => candidate.slug === slug,
-  );
+  const profile = SEED_PROFILES.find((candidate) => candidate.slug === slug);
   if (!profile)
     return {
-      title: "Demo creator profile",
+      title: "Creator profile",
       description:
-        "Inspect fictional or browser-local creator attribution in the Spawn demonstration.",
+        "Inspect fictional or browser-local creator attribution in the Spawn simulation.",
     };
   return {
     title: profile.displayName,
-    description: `Inspect the fictional Spawn demonstration profile for ${profile.displayName}, including attributed launches and activity.`,
+    description: `Inspect the fictional Spawn simulation profile for ${profile.displayName}, including attributed launches and activity.`,
   };
 }
 

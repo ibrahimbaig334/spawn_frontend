@@ -1,8 +1,6 @@
 import Link from "next/link";
 import { PRODUCT_COPY } from "@/content/product-copy";
-import { PROTOCOL_TERMS } from "@/data/protocol-terms";
 import { MilestoneOverview } from "@/components/visuals/milestone-overview";
-import { RoutingCut } from "@/components/visuals/routing-cut";
 
 const EYEBROW =
   "m-0 font-mono text-xs font-bold leading-5 tracking-[0.08em] text-accent uppercase";
@@ -38,42 +36,42 @@ export function LandingHero() {
           </Link>
         </div>
         <p className="mt-8 max-w-xl font-mono text-xs font-bold leading-5 tracking-[0.08em] text-ink-muted uppercase">
-          Intended mechanics for a future deployment · Demonstration only
+          Protocol simulation · No wallet connected · Static 1% fee
         </p>
       </div>
       <div className="grid max-w-[46rem] gap-6 border border-ink bg-raised p-[clamp(1rem,2.5vw,1.75rem)] print:break-inside-avoid">
         <div className="flex justify-between gap-4 border-b border-rule pb-4 max-[42rem]:items-start max-[42rem]:flex-col">
           <p className={EYEBROW}>Protocol schedule / fixed example</p>
           <span className="font-mono text-xs font-bold leading-5">
-            Milestone 08 of 30
+            Band 08 of 30
           </span>
         </div>
         <MilestoneOverview
           completedMilestones={7}
           progressBps={8_820}
-          title="Core milestone schedule"
+          title="Milestone ladder"
         />
         <dl className="m-0 grid grid-cols-3 border-y border-rule max-[42rem]:grid-cols-1 [&>div]:min-w-0 [&>div]:px-2.5 [&>div]:py-3.5 [&>div+div]:border-l [&>div+div]:border-rule max-[42rem]:[&>div+div]:border-t max-[42rem]:[&>div+div]:border-l-0 [&_dt]:text-xs [&_dt]:text-ink-muted [&_dd]:mt-1 [&_dd]:mb-0 [&_dd]:overflow-wrap-anywhere [&_dd]:font-mono [&_dd]:text-[0.82rem] [&_dd]:font-bold">
           <div>
             <dt>Opening valuation</dt>
-            <dd>125 ETH</dd>
+            <dd>125 ETH FDV</dd>
           </div>
           <div>
-            <dt>Next public target</dt>
-            <dd>735.10 ETH</dd>
+            <dt>Graduation at</dt>
+            <dd>2x (level +6931)</dd>
           </div>
           <div>
-            <dt>Current demo fee</dt>
-            <dd>1%</dd>
+            <dt>Trading fee</dt>
+            <dd>1% static</dd>
           </div>
         </dl>
-        <RoutingCut
-          split={PROTOCOL_TERMS.defaultProceedsSplit}
-          mode="approaching"
-          milestoneNumber={8}
-          title="Declared proceeds allocation"
-        />
+        <p className="m-0 border-l-[3px] border-accent bg-paper p-3 text-sm text-ink-muted">
+          Harvested bands fund the payout pot: 10% service fee, 90% to the pot.
+          A flush delivers the pot — 1% tip to the flusher, plugin shares in
+          registry order, remainder to the creator.
+        </p>
       </div>
     </section>
   );
 }
+

@@ -4,35 +4,29 @@ import { describe, expect, it, vi } from "vitest";
 import { PriceHistoryChart } from "@/components/charts/price-history-chart";
 import { CommentThread } from "@/components/comments/comment-thread";
 import { createSeedState } from "@/data/mock-seed";
-import { selectHistory } from "@/domain/selectors";
+import { selectLaunches, selectLedger } from "@/domain/selectors";
 import { demoReducer } from "@/state/demo-reducer";
 import { DemoContext, type DemoContextValue } from "@/state/demo-provider";
 import { mockLaunchpadClient } from "@/services/mock-launchpad-client";
 
 describe("token detail components", () => {
-  it("exposes chart ranges, keyboard selection, and exact data", async () => {
+  it("charts level-derived prices from the ledger", async () => {
     const user = userEvent.setup();
     const state = createSeedState();
-    const launch = state.data.entities.launches["launch-paloma"]!;
-    render(
-      <PriceHistoryChart
-        launch={launch}
-        points={selectHistory(state, launch.id)}
-      />,
-    );
-    const chart = screen.getByRole("img", {
-      name: /paloma demo price history/i,
-    });
-    expect(chart).toHaveAccessibleDescription(/30D history/i);
-    chart.focus();
-    await user.keyboard("{End}");
-    expect(screen.getAllByText(/UTC$/i).length).toBeGreaterThan(0);
-    await user.click(screen.getByRole("button", { name: "All" }));
-    expect(screen.getAllByText(/All history/i).length).toBeGreaterThan(0);
-    await user.click(screen.getByText("View exact history data"));
-    expect(
-      screen.getByRole("table", { name: /exact demo prices/i }),
-    ).toBeInTheDocument();
+    const launch = selectLaunches(state)[0]!;
+    const points = selectLedger(state, launch.poolId);
+    render(<PriceHistoryChart launch={launch} points={points} />);
+    if (points.length) {
+      const chart = screen.getByRole("img");
+      expect(chart).toBeInTheDocument();
+      const point = screen.getAllByRole("button", { name: /level/i })[0]!;
+      await user.click(point);
+      expect(screen.getAllByText(/^level$/i).length).toBeGreaterThan(0);
+    } else {
+      expect(
+        screen.getByText(/no recorded trades yet/i),
+      ).toBeInTheDocument();
+    }
   });
 
   it("validates and dispatches a deterministic browser-local comment", async () => {
@@ -48,9 +42,10 @@ describe("token detail components", () => {
       client: mockLaunchpadClient,
       reset: vi.fn(),
     };
+    const launchId = state.data.order.launches[0]!;
     render(
       <DemoContext value={value}>
-        <CommentThread launchId="launch-paloma" />
+        <CommentThread launchId={launchId} />
       </DemoContext>,
     );
     await user.click(screen.getByRole("button", { name: /record comment/i }));

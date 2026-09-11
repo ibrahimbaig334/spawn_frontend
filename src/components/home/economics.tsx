@@ -1,18 +1,18 @@
 const supply = [
   [
     "25%",
-    "Initial trading inventory",
-    "Available through the modeled opening market.",
+    "Bonding curve",
+    "One pool per launch: 32 just-in-time curve positions spanning a 2x opening span.",
   ],
   [
     "65%",
-    "Milestone inventory",
-    "Distributed evenly across the 30 initial targets.",
+    "Milestone ladder",
+    "30 protocol-owned sell bands at 1.2504x rungs, plus up to 30 fee-funded extensions.",
   ],
   [
     "10%",
-    "Ongoing market liquidity",
-    "Reserved for the modeled post-opening market.",
+    "Full-range backing",
+    "A code-locked graduation position — nobody can provide or remove liquidity.",
   ],
 ] as const;
 
@@ -35,8 +35,8 @@ export function Economics() {
           A fixed supply schedule, made legible.
         </h2>
         <p className="mt-1 mb-0 text-[color:color-mix(in_srgb,#e9e7e0_70%,transparent)] print:text-black">
-          The concept anchors the opening total-supply valuation at 125 ETH.
-          That figure describes a valuation, not an amount raised or guaranteed.
+          Every launch opens at the same 125 ETH fully-diluted valuation. That
+          figure describes a valuation, not an amount raised or guaranteed.
         </p>
       </div>
       <dl className="m-0 grid grid-cols-3 border-y border-[color:color-mix(in_srgb,#e9e7e0_35%,transparent)] max-[52rem]:grid-cols-1 print:border-black [&>div]:p-[clamp(1.25rem,3vw,2rem)] [&>div+div]:border-l [&>div+div]:border-[color:color-mix(in_srgb,#e9e7e0_35%,transparent)] max-[52rem]:[&>div+div]:border-t max-[52rem]:[&>div+div]:border-l-0 print:[&>div+div]:border-black">
@@ -56,74 +56,82 @@ export function Economics() {
       </dl>
       <div className="grid grid-cols-3 border-b border-[color:color-mix(in_srgb,#e9e7e0_35%,transparent)] max-[52rem]:grid-cols-1 print:border-black [&>div]:py-7 [&>div]:pr-6 [&>div+div]:border-l [&>div+div]:border-[color:color-mix(in_srgb,#e9e7e0_35%,transparent)] [&>div+div]:pl-6 max-[52rem]:[&>div+div]:border-t max-[52rem]:[&>div+div]:border-l-0 max-[52rem]:[&>div+div]:pl-0 print:[&>div+div]:border-black [&_h3]:my-2 [&_h3]:font-mono [&_h3]:text-[clamp(1.5rem,3vw,2.4rem)] [&_p:last-child]:m-0 [&_p:last-child]:text-sm [&_p:last-child]:text-[color:color-mix(in_srgb,#e9e7e0_70%,transparent)] print:[&_p:last-child]:text-black">
         <div>
-          <p className={EYEBROW}>Launch-target proceeds</p>
+          <p className={EYEBROW}>Graduation proceeds</p>
           <h3>40 / 55 / 5</h3>
           <p>
-            40% seeds ongoing liquidity, 55% becomes creator proceeds, and 5%
-            goes to the protocol.
+            40% seeds the code-locked full-range position, 55% accrues to the
+            creator&apos;s direct ledger, and 5% to the global protocol ledger.
           </p>
         </div>
         <div>
-          <p className={EYEBROW}>Ongoing fee routing</p>
-          <h3>60 / 30 / 10</h3>
+          <p className={EYEBROW}>Trading fees (ETH side)</p>
+          <h3>75 / 25</h3>
           <p>
-            60% supports liquidity, 30% accrues to the creator earnings right,
-            and 10% goes to the protocol.
+            Post-graduation ETH-side fees route 75% to the creator and the
+            exact remainder to the protocol. Governance can move the creator
+            share up to 90%, prospectively.
           </p>
         </div>
         <div>
-          <p className={EYEBROW}>Milestone allocation</p>
-          <h3>60 / 20 / 10 / 10</h3>
+          <p className={EYEBROW}>Milestone harvests</p>
+          <h3>10 / 90</h3>
           <p>
-            60% to the creator, 20% to token purchase and permanent removal, 10%
-            to the protocol, and 10% to liquidity.
+            Each harvested band pays a 10% service fee to the protocol and
+            funds the payout pot with the exact remainder, which flushes to
+            the launch&apos;s selected plugins.
           </p>
         </div>
       </div>
       <div className="grid grid-cols-[minmax(16rem,1fr)_minmax(18rem,.8fr)] gap-[clamp(2rem,7vw,7rem)] py-[clamp(3rem,6vw,5rem)] max-[52rem]:grid-cols-1">
         <div>
-          <p className={EYEBROW}>Trading fees</p>
+          <p className={EYEBROW}>Trading fee</p>
           <h3 className="mt-3 mb-3 max-w-[18ch] text-[clamp(1.6rem,3vw,2.7rem)] leading-tight">
-            Fees decrease after demonstrated progress.
+            One percent. Forever.
           </h3>
           <p className="m-0 text-[color:color-mix(in_srgb,#e9e7e0_70%,transparent)] print:text-black">
-            The modeled fee changes only at the stated completion counts.
+            The fee is static for the pool&apos;s entire lifetime: no dynamic
+            flag, no milestone schedule, no governance knob. Buys pay it in
+            ETH; sells pay it in token.
           </p>
         </div>
         <table className="w-full border-collapse text-left text-sm">
           <caption className="absolute size-px overflow-hidden whitespace-nowrap [clip:rect(0,0,0,0)]">
-            Modeled trading fee schedule
+            Static trading fee
           </caption>
           <thead>
             <tr className="border-b-2 border-[#e9e7e0] print:border-black">
               <th className="p-3 pl-0" scope="col">
-                Completed milestones
+                Pool property
               </th>
               <th className="p-3 pr-0 text-right" scope="col">
-                Fee
+                Value
               </th>
             </tr>
           </thead>
           <tbody className="[&_tr]:border-b [&_tr]:border-[color:color-mix(in_srgb,#e9e7e0_35%,transparent)] print:[&_tr]:border-black [&_th]:p-3 [&_th]:pl-0 [&_th]:font-normal [&_td]:p-3 [&_td]:pr-0 [&_td]:text-right [&_td]:font-mono [&_td]:font-bold">
             <tr>
-              <th scope="row">0–7</th>
+              <th scope="row">Trading fee</th>
               <td>1%</td>
             </tr>
             <tr>
-              <th scope="row">8–15</th>
-              <td>0.75%</td>
+              <th scope="row">Tick spacing</th>
+              <td>1</td>
             </tr>
             <tr>
-              <th scope="row">16 or more</th>
-              <td>0.5%</td>
+              <th scope="row">Quote currency</th>
+              <td>ETH (native)</td>
+            </tr>
+            <tr>
+              <th scope="row">Third-party liquidity</th>
+              <td>Rejected</td>
             </tr>
           </tbody>
         </table>
       </div>
       <p className="m-0 border-l-4 border-accent bg-raised p-5 text-ink print:border-black">
-        <strong>No free creator allocation.</strong> A creator may make a
-        disclosed purchase under the same modeled market conditions as other
-        participants.
+        <strong>No free creator allocation.</strong> A creator may make a dev
+        buy of up to 10% of supply on ordinary buyer terms — tokens delivered
+        fully at launch, no vesting.
       </p>
     </section>
   );

@@ -1,20 +1,14 @@
-import { PROTOCOL_TERMS } from "@/data/protocol-terms";
-import type { LaunchDraft } from "@/domain/launch-validation";
-import type { ProceedsSplit } from "@/types/protocol";
+import type { LaunchDraft } from "@/domain/launch-draft";
+import { INITIAL_DRAFT, validateDraft } from "@/domain/launch-draft";
+import { SEED_REGISTRY } from "@/data/mock-seed";
 
 export const LAUNCH_DRAFT_STORAGE_KEY = "spawn.launch-draft";
-export const LAUNCH_DRAFT_STORAGE_VERSION = 2 as const;
+export const LAUNCH_DRAFT_STORAGE_VERSION = 3 as const;
 
 type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
-type LegacySplit = {
-  creator: number;
-  removal: number;
-  spawn: number;
-  trading: number;
-};
 
-interface StoredDraftV2 {
-  version: 2;
+interface StoredDraftV3 {
+  version: 3;
   draft: LaunchDraft;
 }
 
@@ -22,76 +16,54 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function integer(
-  value: unknown,
-  maximum = Number.MAX_SAFE_INTEGER,
-): value is number {
+function percent(value: unknown): value is number {
   return (
     typeof value === "number" &&
-    Number.isSafeInteger(value) &&
+    Number.isFinite(value) &&
     value >= 0 &&
-    value <= maximum
+    value <= 10
   );
 }
 
-function validSplit(value: unknown, keys: readonly string[]): boolean {
-  if (!isRecord(value) || Object.keys(value).length !== keys.length)
-    return false;
-  const shares = keys.map((key) => value[key]);
-  return (
-    shares.every((share) => integer(share, 10_000)) &&
-    shares.reduce<number>((sum, share) => sum + Number(share), 0) === 10_000
-  );
-}
-
-function validDraft(
-  value: unknown,
-  splitKeys: readonly string[],
-): value is Record<string, unknown> &
-  Omit<LaunchDraft, "split"> & { split: ProceedsSplit | LegacySplit } {
-  if (!isRecord(value) || !validSplit(value.split, splitKeys)) return false;
+function validDraft(value: unknown): value is LaunchDraft {
+  if (!isRecord(value)) return false;
+  if (!isRecord(value.socials)) return false;
   return (
     typeof value.name === "string" &&
     typeof value.symbol === "string" &&
-    typeof value.supply === "string" &&
+    typeof value.totalSupply === "string" &&
+    typeof value.devBuyEnabled === "boolean" &&
+    percent(value.devBuyPercent) &&
+    /^\d+$/.test(String(value.payoutPlan)) &&
+    typeof value.deadlineMinutes === "number" &&
+    Number.isSafeInteger(value.deadlineMinutes) &&
+    value.deadlineMinutes >= 5 &&
+    value.deadlineMinutes <= 1440 &&
     typeof value.description === "string" &&
-    typeof value.creatorPurchaseEnabled === "boolean" &&
-    integer(value.creatorPurchaseBps, PROTOCOL_TERMS.maxCreatorPurchaseBps) &&
-    integer(value.lockupMonths, PROTOCOL_TERMS.maxLockupMonths) &&
-    typeof value.acknowledged === "boolean"
+    value.description.length <= 500 &&
+    (value.logoUrl === undefined || typeof value.logoUrl === "string") &&
+    ["website", "x", "telegram", "discord"].every(
+      (key) =>
+        typeof (value.socials as Record<string, unknown>)[key] === "string",
+    )
   );
 }
 
-function withoutAcknowledgement(draft: LaunchDraft): LaunchDraft {
-  return { ...draft, split: { ...draft.split }, acknowledged: false };
+function withoutDeadline(draft: LaunchDraft): LaunchDraft {
+  return { ...draft };
 }
 
 export function parseStoredLaunchDraft(raw: string | null): LaunchDraft | null {
   if (raw === null) return null;
   try {
     const value: unknown = JSON.parse(raw);
-    if (!isRecord(value) || !isRecord(value.draft)) return null;
-    const currentKeys = [
-      "creator",
-      "buyback",
-      "protocol",
-      "liquidity",
-    ] as const;
-    if (value.version === 2 && validDraft(value.draft, currentKeys)) {
-      return withoutAcknowledgement(value.draft as LaunchDraft);
-    }
-    const legacyKeys = ["creator", "removal", "spawn", "trading"] as const;
-    if (value.version === 1 && validDraft(value.draft, legacyKeys)) {
-      const legacy = value.draft.split as LegacySplit;
-      return withoutAcknowledgement({
-        ...(value.draft as unknown as LaunchDraft),
-        split: {
-          creator: legacy.creator,
-          buyback: legacy.removal,
-          protocol: legacy.spawn,
-          liquidity: legacy.trading,
-        },
-      });
+    if (
+      isRecord(value) &&
+      value.version === 3 &&
+      isRecord(value.draft) &&
+      validDraft(value.draft)
+    ) {
+      return withoutDeadline(value.draft);
     }
     return null;
   } catch {
@@ -105,7 +77,12 @@ export function loadLaunchDraft(storage?: StorageLike): LaunchDraft | null {
     (typeof window === "undefined" ? undefined : window.localStorage);
   if (!target) return null;
   try {
-    return parseStoredLaunchDraft(target.getItem(LAUNCH_DRAFT_STORAGE_KEY));
+    const draft = parseStoredLaunchDraft(target.getItem(LAUNCH_DRAFT_STORAGE_KEY));
+    if (!draft) return null;
+    // A stored draft referencing suspended/unknown plugins falls back clean.
+    const errors = validateDraft(draft, SEED_REGISTRY);
+    if (errors.payoutPlan) return INITIAL_DRAFT;
+    return draft;
   } catch {
     return null;
   }
@@ -118,14 +95,10 @@ export function saveLaunchDraft(
   const target =
     storage ??
     (typeof window === "undefined" ? undefined : window.localStorage);
-  if (
-    !target ||
-    !validDraft(draft, ["creator", "buyback", "protocol", "liquidity"])
-  )
-    return false;
-  const value: StoredDraftV2 = {
+  if (!target || !validDraft(draft)) return false;
+  const value: StoredDraftV3 = {
     version: LAUNCH_DRAFT_STORAGE_VERSION,
-    draft: withoutAcknowledgement(draft),
+    draft: withoutDeadline(draft),
   };
   try {
     target.setItem(LAUNCH_DRAFT_STORAGE_KEY, JSON.stringify(value));

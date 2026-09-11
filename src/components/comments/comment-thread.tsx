@@ -3,11 +3,14 @@
 import { useState } from "react";
 import { formatDemoUtc, demoTimestamp } from "@/domain/demo-time";
 import { selectComments } from "@/domain/selectors";
-import { createLocalCommentId } from "@/state/demo-reducer";
 import { useDemo } from "@/state/use-demo";
-import type { LaunchId } from "@/types/launch";
+import type { LaunchId } from "@/types/demo";
 
 const MAX_LENGTH = 500;
+
+function createLocalCommentId(sequence: number): string {
+  return `comment-local-${sequence}`;
+}
 
 export function CommentThread({ launchId }: { launchId: LaunchId }) {
   const { state, dispatch } = useDemo();

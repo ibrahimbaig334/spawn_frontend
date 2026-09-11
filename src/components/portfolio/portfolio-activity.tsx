@@ -81,11 +81,11 @@ export function PortfolioActivity() {
                           ? "Gross input"
                           : "Gross proceeds"}
                       </dt>
-                      <dd>{formatEth(entry.grossEth, 6)}</dd>
+                      <dd>{formatEth(entry.grossInput, 6)}</dd>
                     </div>
                     <div>
-                      <dt>Demo fee</dt>
-                      <dd>{formatEth(entry.feeEth, 6)}</dd>
+                      <dt>Fee (1%)</dt>
+                      <dd>{formatEth(entry.feeAmount, 6)}</dd>
                     </div>
                     <div>
                       <dt>
@@ -93,7 +93,9 @@ export function PortfolioActivity() {
                       </dt>
                       <dd>
                         {formatEth(
-                          entry.side === "buy" ? entry.grossEth : entry.netEth,
+                          entry.side === "buy"
+                            ? entry.grossInput
+                            : entry.netOutput,
                           6,
                         )}
                       </dd>

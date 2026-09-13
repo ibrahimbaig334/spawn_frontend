@@ -91,9 +91,10 @@ interface Geometry {
   priceH: number;
   min: number;
   max: number;
-  t0: number;
-  t1: number;
-  x(t: number): number;
+  n: number;
+  /** Ordinal position: candles are evenly spaced (TradingView-style), so
+   * sparse sessions never pile up or drift out of frame. */
+  x(i: number): number;
   y(v: number): number;
 }
 
@@ -105,7 +106,7 @@ function computeGeometry(points: Point[], width: number): Geometry | null {
   const plotW = width - padL - padR;
   const volH = 52;
   const priceH = HEIGHT - padT - padB - volH - 8;
-  if (plotW <= 40 || priceH <= 40) return null;
+  if (plotW <= 40 || priceH <= 40 || points.length === 0) return null;
   const values = points.flatMap((p) => [p.high, p.low]);
   let max = Math.max(...values);
   let min = Math.min(...values);
@@ -116,11 +117,10 @@ function computeGeometry(points: Point[], width: number): Geometry | null {
   const pad = (max - min) * 0.08;
   max += pad;
   min = Math.max(0, min - pad);
-  const firstTime = points[0]!.time;
-  const lastTime = points.at(-1)!.time;
-  const timePad = Math.max((lastTime - firstTime) * 0.03, 60_000);
-  const t0 = firstTime - timePad * 0.4;
-  const t1 = lastTime + timePad;
+  const n = points.length;
+  // Half-slot inset on both edges; an extra breathing slot on the right so
+  // the last candle never touches the price axis.
+  const span = n + 1;
   const volTop = padT + priceH + 8;
   return {
     padL,
@@ -132,9 +132,8 @@ function computeGeometry(points: Point[], width: number): Geometry | null {
     priceH,
     min,
     max,
-    t0,
-    t1,
-    x: (t) => padL + ((t - t0) / (t1 - t0)) * plotW,
+    n,
+    x: (i) => padL + ((i + 0.75) / span) * plotW,
     y: (v) => padT + ((max - v) / (max - min)) * priceH,
   };
 }
@@ -253,32 +252,39 @@ export function PriceHistoryChart({
       ctx.fillText(axisPrice(tick), g.padL + g.plotW + 6, yy);
     }
 
-    const spanMs = g.t1 - g.t0;
-    const timeStep = spanMs / 5;
+    const spanMs = points.at(-1)!.time - points[0]!.time;
+    const labelEvery = Math.max(1, Math.floor(points.length / 5));
     ctx.fillStyle = AXIS_TEXT;
     ctx.textAlign = "center";
-    for (let i = 0; i <= 5; i += 1) {
-      const t = g.t0 + timeStep * i;
-      ctx.fillText(timeLabel(t, spanMs), g.x(t), HEIGHT - 12);
+    for (let i = 0; i < points.length; i += labelEvery) {
+      const cx = g.x(i);
+      ctx.strokeStyle = GRID;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(Math.round(cx) + 0.5, g.padT);
+      ctx.lineTo(Math.round(cx) + 0.5, g.padT + g.priceH + g.volH + 8);
+      ctx.stroke();
+      ctx.fillText(timeLabel(points[i]!.time, spanMs), cx, HEIGHT - 12);
     }
     ctx.textAlign = "left";
 
     const maxVol = Math.max(...points.map((p) => p.volume), 0);
+    const slot = g.plotW / (g.n + 1);
+    const bodyW = Math.min(Math.max(slot * 0.52, 2), 14);
     if (maxVol > 0) {
-      const bw = Math.max(g.plotW / points.length - 2, 1);
-      for (const p of points) {
+      for (let i = 0; i < points.length; i += 1) {
+        const p = points[i]!;
         const h = Math.max((p.volume / maxVol) * g.volH, p.volume > 0 ? 1.5 : 0);
         ctx.fillStyle = p.close >= p.open ? "rgba(38, 166, 154, 0.45)" : "rgba(239, 83, 80, 0.45)";
-        ctx.fillRect(g.x(p.time) - bw / 2, g.volTop + g.volH - h, bw, h);
+        ctx.fillRect(g.x(i) - bodyW / 2, g.volTop + g.volH - h, bodyW, h);
       }
     }
 
-    const slot = g.plotW / Math.max(points.length, 1);
-    const bodyW = Math.min(Math.max(slot * 0.62, 2), 22);
-    for (const p of points) {
+    for (let i = 0; i < points.length; i += 1) {
+      const p = points[i]!;
       const rising = p.close >= p.open;
       const color = rising ? UP : DOWN;
-      const cx = g.x(p.time);
+      const cx = g.x(i);
       ctx.strokeStyle = color;
       ctx.lineWidth = Math.max(bodyW * 0.18, 1);
       ctx.beginPath();
@@ -333,7 +339,7 @@ export function PriceHistoryChart({
     const g = computeGeometry(current, width);
     if (!g) return;
     const p = current[index]!;
-    const cx = g.x(p.time);
+    const cx = g.x(index);
     const cy = g.y(p.close);
     ctx.strokeStyle = CROSSHAIR;
     ctx.setLineDash([3, 3]);
@@ -347,6 +353,16 @@ export function PriceHistoryChart({
     ctx.lineTo(g.padL + g.plotW + g.padR, cy);
     ctx.stroke();
     ctx.setLineDash([]);
+    // Hover price tag on the axis, mirroring the last-price tag.
+    const label = axisPrice(p.close);
+    ctx.font = "10px ui-monospace, monospace";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#5b606b";
+    const tagY = Math.min(Math.max(cy - 9, g.padT), g.padT + g.priceH + g.volH + 8 - 18);
+    ctx.fillRect(g.padL + g.plotW + 1, tagY, g.padR - 2, 18);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(label, g.padL + g.plotW + 6, tagY + 9);
   };
 
   const scheduleOverlay = (index: number | null) => {
@@ -361,17 +377,9 @@ export function PriceHistoryChart({
     const rect = canvas.getBoundingClientRect();
     const g = computeGeometry(current, width);
     if (!g) return null;
-    const t = g.t0 + ((clientX - rect.left - g.padL) / g.plotW) * (g.t1 - g.t0);
-    let best = 0;
-    let bestDist = Infinity;
-    for (let i = 0; i < current.length; i += 1) {
-      const dist = Math.abs(current[i]!.time - t);
-      if (dist < bestDist) {
-        bestDist = dist;
-        best = i;
-      }
-    }
-    return best;
+    const slot = g.plotW / (g.n + 1);
+    const raw = ((clientX - rect.left - g.padL) / slot) - 0.75;
+    return Math.min(g.n - 1, Math.max(0, Math.round(raw)));
   };
 
   const onMove = (event: React.MouseEvent<HTMLCanvasElement>) => {

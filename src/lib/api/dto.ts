@@ -45,6 +45,7 @@ export interface TokenListItem {
   fdvEthWei: WeiString | null;
   mcapEthWei: WeiString | null;
   athMcapEthWei: WeiString | null;
+  imageUri: string | null;
   buyVolumeEth: WeiString;
   sellVolumeEth: WeiString;
   swapCount: WeiString;

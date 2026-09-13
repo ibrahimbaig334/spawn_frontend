@@ -32,7 +32,7 @@ import type { TradeItem, WsTick } from "@/lib/api/dto";
 import { MilestoneOverview } from "@/components/visuals/milestone-overview";
 import { useTraderMap } from "@/lib/use-trader";
 import { ApiError } from "@/lib/api/client";
-import { resolveImageUrl } from "@/services/ipfs-client";
+import { TokenImage } from "@/components/tokens/token-image";
 import {
   formatCompactEth,
   formatUsdApproxFromEthWei,
@@ -481,12 +481,12 @@ export function TokenDetailPage({ tokenRef }: { tokenRef: string }) {
             className="grid size-[clamp(4rem,8vw,6rem)] shrink-0 place-items-center overflow-hidden border border-ink font-mono text-[clamp(1rem,2vw,1.5rem)] font-bold text-accent-strong"
             aria-hidden="true"
           >
-            {detail.imageUri ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={resolveImageUrl(detail.imageUri)} alt="" className="size-full object-cover" />
-            ) : (
-              (detail.symbol ?? "?").slice(0, 2)
-            )}
+            <TokenImage
+              imageUri={detail.imageUri}
+              symbol={detail.symbol}
+              className="size-full object-cover"
+              eager
+            />
           </span>
           <div className="min-w-0">
             <p className="m-0 font-mono text-xs font-bold tracking-[0.08em] text-accent-strong uppercase">

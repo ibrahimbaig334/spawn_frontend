@@ -26,3 +26,4 @@ export {
   type StatusTone,
 } from "./status-region";
 export { ArrowRightIcon, CheckIcon, ExternalLinkIcon, PlusIcon } from "./icons";
+export { Dropdown, type DropdownOption } from "./dropdown";

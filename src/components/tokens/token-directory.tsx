@@ -14,8 +14,9 @@ import {
   wei,
 } from "@/lib/display";
 import { formatSubscriptPrice } from "@/lib/format";
-import { Button, SelectField, StatusRegion, StatusMessage } from "@/components/ui";
-import { truncateAddress } from "@/services/ipfs-client";
+import { Button, Dropdown, StatusRegion, StatusMessage } from "@/components/ui";
+import { TokenImage } from "@/components/tokens/token-image";
+import { resolveImageUrl, truncateAddress } from "@/services/ipfs-client";
 import { WAD } from "@/protocol/constants";
 
 const PAGE_WIDTH =
@@ -38,18 +39,40 @@ function volumeEth(item: TokenListItem): string {
 function TokenAvatar({ item }: { item: TokenListItem }) {
   return (
     <span className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-full border-2 border-[#e9e7e0]/30 bg-[#14100d] text-sm font-black text-[#f5c518]">
-      {item.symbol ? item.symbol.slice(0, 2).toUpperCase() : "?"}
+      <TokenImage
+        imageUri={item.imageUri}
+        symbol={item.symbol}
+        className="size-full object-cover"
+      />
+    </span>
+  );
+}
+
+function CardBanner({ imageUri }: { imageUri: string | null }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return null;
+  return (
+    <span className="-m-4 mb-0 block h-24 overflow-hidden bg-[#14100d]" aria-hidden="true">
+      <TokenImage
+        imageUri={imageUri}
+        symbol={null}
+        className="size-full object-cover"
+        hideOnFail
+        onFail={() => setFailed(true)}
+      />
     </span>
   );
 }
 
 function TokenGridCard({ item }: { item: TokenListItem }) {
   const progress = curveProgressPercent(item);
+  const banner = resolveImageUrl(item.imageUri);
   return (
     <Link
-      className="group grid content-start gap-3 rounded-xl border-2 border-ink bg-carbon p-4 text-[#e9e7e0] no-underline transition-transform hover:-translate-y-0.5"
+      className="group grid content-start gap-3 overflow-hidden rounded-xl border-2 border-ink bg-carbon p-4 text-[#e9e7e0] no-underline transition-transform hover:-translate-y-0.5"
       href={`/tokens/${item.poolId}`}
     >
+      {banner ? <CardBanner imageUri={item.imageUri} /> : null}
       <div className="flex items-center gap-3">
         <TokenAvatar item={item} />
         <div className="min-w-0">
@@ -209,40 +232,38 @@ export function TokenDirectory() {
           </form>
         </div>
         <div className="flex flex-wrap items-center gap-4">
-          <SelectField
+          <Dropdown
             id="directory-phase"
             label="Phase"
-            className="text-sm"
-            aria-label="Filter by phase"
             value={query.phase ?? ""}
-            onChange={(event) => {
+            options={[
+              { value: "", label: "All phases", hint: "New launches and graduated markets" },
+              { value: "bonding", label: "New launches", hint: "Still climbing to graduation" },
+              { value: "graduated", label: "Graduated", hint: "Trading on permanent markets" },
+            ]}
+            onChange={(selected) => {
               const next = new URLSearchParams(params.toString());
-              if (event.target.value) next.set("phase", event.target.value);
+              if (selected) next.set("phase", selected);
               else next.delete("phase");
               replaceParams(next);
             }}
-          >
-            <option value="">All phases</option>
-            <option value="bonding">Bonding curve</option>
-            <option value="graduated">Graduated</option>
-          </SelectField>
-          <SelectField
+          />
+          <Dropdown
             id="directory-sort"
             label="Sort"
-            className="text-sm"
-            aria-label="Sort tokens"
             value={query.sort}
-            onChange={(event) => {
+            options={[
+              { value: "newest", label: "Newest", hint: "Recently launched first" },
+              { value: "volume", label: "Most traded", hint: "Highest total volume" },
+              { value: "market_cap", label: "Biggest", hint: "Highest market cap" },
+              { value: "graduated", label: "Graduated first", hint: "Finished launches on top" },
+            ]}
+            onChange={(selected) => {
               const next = new URLSearchParams(params.toString());
-              next.set("sort", event.target.value);
+              next.set("sort", selected);
               replaceParams(next);
             }}
-          >
-            <option value="newest">Newest</option>
-            <option value="volume">Volume</option>
-            <option value="market_cap">Market cap</option>
-            <option value="graduated">Graduated first</option>
-          </SelectField>
+          />
           <div className="ml-auto flex items-center gap-2 pt-5">
             <Button
               variant={view === "grid" ? "primary" : "secondary"}

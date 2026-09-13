@@ -28,7 +28,9 @@ import {
   flushPool,
   graduatePool,
 } from "@/lib/chain/trades";
-import type { TradeItem, WsTick } from "@/lib/api/dto";
+import type { MilestoneItem, TradeItem, WsTick } from "@/lib/api/dto";
+import { CORE_BAND_COUNT, FIXED_TOTAL_SUPPLY } from "@/protocol/constants";
+import { fdvEthWei } from "@/protocol/level-math";
 import { MilestoneOverview } from "@/components/visuals/milestone-overview";
 import { useTraderMap } from "@/lib/use-trader";
 import { ApiError } from "@/lib/api/client";
@@ -48,15 +50,55 @@ import {
 } from "@/lib/format";
 import { explorerAddress, explorerTx } from "@/lib/env";
 import { truncateAddress } from "@/services/ipfs-client";
-import { useWatchlist } from "@/lib/watchlist";
 
 const PAGE_WIDTH =
   "mx-auto w-full max-w-measure px-[max(1rem,calc((100vw-80rem)/2))]";
 const PANEL = "border border-ink bg-raised p-4";
 const PANEL_LABEL =
   "m-0 font-mono text-[0.68rem] font-bold tracking-[0.08em] text-accent-strong uppercase";
-const BOOKMARK =
-  "h-3.5 w-2.5 border-[1.5px] border-current [clip-path:polygon(0_0,100%_0,100%_100%,50%_72%,0_100%)] forced-colors:[clip-path:none]";
+/** Progress toward the next unpaid milestone, measured from the graduation
+ * valuation (or the last paid milestone) to the next target. */
+function MilestoneNextProgress({
+  mcapEthWei,
+  graduationLevel,
+  milestones,
+}: {
+  mcapEthWei: string | null;
+  graduationLevel: number;
+  milestones: MilestoneItem[];
+}) {
+  const core = milestones
+    .filter((band) => band.index < CORE_BAND_COUNT)
+    .sort((a, b) => a.index - b.index);
+  if (core.length === 0 || mcapEthWei === null) return null;
+  const nextPosition = core.findIndex((band) => band.state !== "HARVESTED");
+  if (nextPosition === -1) {
+    return (
+      <p className="mt-8 mb-0 text-xs font-bold text-ink-muted">
+        All {core.length} milestones paid out.
+      </p>
+    );
+  }
+  const next = core[nextPosition]!;
+  const target = fdvEthWei(FIXED_TOTAL_SUPPLY, next.levelUpper);
+  const paidBefore = core.slice(0, nextPosition).filter((band) => band.state === "HARVESTED");
+  const floor =
+    paidBefore.length > 0
+      ? (fdvEthWei(FIXED_TOTAL_SUPPLY, paidBefore[paidBefore.length - 1]!.levelUpper) || 1n)
+      : fdvEthWei(FIXED_TOTAL_SUPPLY, graduationLevel) || 1n;
+  const current = wei(mcapEthWei);
+  const span = target > floor ? target - floor : 1n;
+  const done = current <= floor ? 0n : current >= target ? target - floor : current - floor;
+  const pct = Number((done * 10_000n) / span) / 100;
+  return (
+    <Progress
+      className="mb-8 mt-8"
+      label={`Milestone #${nextPosition + 1} of ${core.length} — pays out at ${formatUsdApproxFromEthWei(target.toString())}`}
+      value={pct}
+      valueLabel={`${pct.toFixed(2)}%`}
+    />
+  );
+}
 
 function Stat({ label, value, sub }: { label: string; value: ReactNode; sub?: ReactNode }) {
   return (
@@ -409,7 +451,6 @@ export function TokenDetailPage({ tokenRef }: { tokenRef: string }) {
   const stream = usePoolStream(poolId);
   const trades = useTrades(tokenRef, { sort: "newest", limit: 40 }, 10_000);
   const milestones = useMilestones(tokenRef, token.data?.status === "graduated");
-  const watchlist = useWatchlist();
   const wallet = useWallet();
   // Stream ticks that already settled into the REST tape are hidden there so
   // no trade ever appears twice.
@@ -542,15 +583,6 @@ export function TokenDetailPage({ tokenRef }: { tokenRef: string }) {
           </div>
         </div>
         <div className="grid min-w-40 gap-2 max-[48rem]:grid-cols-2 max-[34rem]:grid-cols-1">
-          <button
-            className="inline-flex min-h-target cursor-pointer items-center justify-center gap-2 border border-ink bg-transparent px-3 py-2 font-bold aria-pressed:border-accent-strong aria-pressed:text-accent-strong"
-            type="button"
-            aria-pressed={watchlist.isWatched(detail.poolId)}
-            onClick={() => watchlist.toggle(detail.poolId)}
-          >
-            <span className={BOOKMARK} aria-hidden="true" />
-            {watchlist.isWatched(detail.poolId) ? "Watched" : "Add to watchlist"}
-          </button>
           {graduationNext ? <GraduateButton token={detail.token as Address} poolId={detail.poolId} /> : null}
         </div>
       </header>
@@ -622,10 +654,11 @@ export function TokenDetailPage({ tokenRef }: { tokenRef: string }) {
               </div>
             </>
           ) : (
-            <p className="mt-8 mb-0 text-xs font-bold text-ink-muted">
-              Graduated — trading continues on the permanent market ({detail.milestones.completed} milestones
-              paid out, {detail.milestones.live} active).
-            </p>
+            <MilestoneNextProgress
+              mcapEthWei={price.data?.mcapEthWei ?? null}
+              graduationLevel={detail.graduationLevel ?? detail.farLevel}
+              milestones={(milestones.data?.data ?? []) as MilestoneItem[]}
+            />
           )}
 
           <PriceHistoryChart tokenRef={tokenRef} poolId={detail.poolId} stream={stream} />

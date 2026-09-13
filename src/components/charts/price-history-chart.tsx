@@ -6,6 +6,8 @@ import type { CandleInterval } from "@/lib/api/dto";
 import type { PoolStream } from "@/lib/use-pool-stream";
 
 const INTERVALS: CandleInterval[] = ["1m", "5m", "15m", "1h", "4h", "1d"];
+const LIMIT = 150;
+const HEIGHT = 340;
 
 const UP = "#26a69a";
 const DOWN = "#ef5350";
@@ -79,6 +81,64 @@ function timeLabel(time: number, spanMs: number): string {
   return `${hh}:${mm}`;
 }
 
+interface Geometry {
+  padL: number;
+  padR: number;
+  padT: number;
+  volTop: number;
+  volH: number;
+  plotW: number;
+  priceH: number;
+  min: number;
+  max: number;
+  t0: number;
+  t1: number;
+  x(t: number): number;
+  y(v: number): number;
+}
+
+function computeGeometry(points: Point[], width: number): Geometry | null {
+  const padL = 8;
+  const padR = 68;
+  const padT = 8;
+  const padB = 24;
+  const plotW = width - padL - padR;
+  const volH = 52;
+  const priceH = HEIGHT - padT - padB - volH - 8;
+  if (plotW <= 40 || priceH <= 40) return null;
+  const values = points.flatMap((p) => [p.high, p.low]);
+  let max = Math.max(...values);
+  let min = Math.min(...values);
+  if (max === min) {
+    max *= 1.001;
+    min *= 0.999;
+  }
+  const pad = (max - min) * 0.08;
+  max += pad;
+  min = Math.max(0, min - pad);
+  const firstTime = points[0]!.time;
+  const lastTime = points.at(-1)!.time;
+  const timePad = Math.max((lastTime - firstTime) * 0.03, 60_000);
+  const t0 = firstTime - timePad * 0.4;
+  const t1 = lastTime + timePad;
+  const volTop = padT + priceH + 8;
+  return {
+    padL,
+    padR,
+    padT,
+    volTop,
+    volH,
+    plotW,
+    priceH,
+    min,
+    max,
+    t0,
+    t1,
+    x: (t) => padL + ((t - t0) / (t1 - t0)) * plotW,
+    y: (v) => padT + ((max - v) / (max - min)) * priceH,
+  };
+}
+
 export function PriceHistoryChart({
   tokenRef,
   stream,
@@ -89,10 +149,15 @@ export function PriceHistoryChart({
 }) {
   const [interval, setInterval] = useState<CandleInterval>("1m");
   const [hover, setHover] = useState<number | null>(null);
-  const candles = useCandles(tokenRef, interval, interval === "1m" ? 300 : 500);
+  const candles = useCandles(tokenRef, interval, LIMIT);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const baseRef = useRef<HTMLCanvasElement>(null);
+  const overlayRef = useRef<HTMLCanvasElement>(null);
   const [width, setWidth] = useState(0);
+  // Hover index lives in a ref for the overlay loop; state only feeds the
+  // OHLC readout (set only when the index actually changes).
+  const hoverRef = useRef<number | null>(null);
+  const rafRef = useRef(0);
 
   const [live, setLive] = useState<{ interval: CandleInterval; point: Point } | null>(null);
   const livePoint = live?.interval === interval ? live.point : null;
@@ -135,189 +200,194 @@ export function PriceHistoryChart({
     return base;
   }, [candles.data, interval, livePoint]);
 
+  const pointsRef = useRef<Point[]>(points);
+  useEffect(() => {
+    pointsRef.current = points;
+  }, [points]);
+
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
+    const target = el;
     const observer = new ResizeObserver((entries) => {
-      setWidth(Math.max(0, entries[0]?.contentRect.width ?? 0));
+      const next = Math.max(0, Math.round(entries[0]?.contentRect.width ?? 0));
+      setWidth((current) => (current === next ? current : next));
     });
-    observer.observe(el);
+    observer.observe(target);
     return () => observer.disconnect();
   }, []);
 
-  const active = hover !== null ? (points[hover] ?? null) : null;
   const latest = points.at(-1) ?? null;
-  const shown = active ?? latest;
+  const shown = hover !== null ? (points[hover] ?? null) : latest;
   const first = points[0] ?? null;
   const rangeChange =
     first && latest && first.open > 0 ? ((latest.close - first.open) / first.open) * 100 : 0;
 
+  // Base layer: candles, volume, grid, axes, last-price tag. Redraws only
+  // when data or size changes — never on hover.
   useEffect(() => {
-    const canvas = canvasRef.current;
+    const canvas = baseRef.current;
     if (!canvas || width <= 0 || points.length === 0) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const cssH = 340;
     canvas.width = Math.round(width * dpr);
-    canvas.height = Math.round(cssH * dpr);
-    canvas.style.height = `${cssH}px`;
+    canvas.height = Math.round(HEIGHT * dpr);
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, width, cssH);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, HEIGHT);
+    const g = computeGeometry(points, width);
+    if (!g) return;
 
-    const padL = 8;
-    const padR = 68;
-    const padT = 8;
-    const padB = 24;
-    const plotW = width - padL - padR;
-    const volH = 52;
-    const priceH = cssH - padT - padB - volH - 8;
-    if (plotW <= 40 || priceH <= 40) return;
-
-    const values = points.flatMap((p) => [p.high, p.low]);
-    let max = Math.max(...values);
-    let min = Math.min(...values);
-    if (max === min) {
-      max *= 1.001;
-      min *= 0.999;
-    }
-    const pad = (max - min) * 0.08;
-    max += pad;
-    min = Math.max(0, min - pad);
-    const firstTime = points[0]!.time;
-    const lastTime = points.at(-1)!.time;
-    const timePad = Math.max((lastTime - firstTime) * 0.03, 60_000);
-    const t0 = firstTime - timePad * 0.4;
-    const t1 = lastTime + timePad;
-
-    const x = (t: number) => padL + ((t - t0) / (t1 - t0)) * plotW;
-    const y = (v: number) => padT + ((max - v) / (max - min)) * priceH;
-
-    // Grid + price labels.
     ctx.font = "10px ui-monospace, monospace";
     ctx.textBaseline = "middle";
-    for (const tick of niceTicks(min, max, 5)) {
-      const yy = Math.round(y(tick)) + 0.5;
+    ctx.textAlign = "left";
+    for (const tick of niceTicks(g.min, g.max, 5)) {
+      const yy = Math.round(g.y(tick)) + 0.5;
       ctx.strokeStyle = GRID;
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(padL, yy);
-      ctx.lineTo(padL + plotW, yy);
+      ctx.moveTo(g.padL, yy);
+      ctx.lineTo(g.padL + g.plotW, yy);
       ctx.stroke();
       ctx.fillStyle = AXIS_TEXT;
-      ctx.fillText(axisPrice(tick), padL + plotW + 6, yy);
+      ctx.fillText(axisPrice(tick), g.padL + g.plotW + 6, yy);
     }
 
-    // Time labels.
-    const spanMs = t1 - t0;
+    const spanMs = g.t1 - g.t0;
     const timeStep = spanMs / 5;
     ctx.fillStyle = AXIS_TEXT;
     ctx.textAlign = "center";
     for (let i = 0; i <= 5; i += 1) {
-      const t = t0 + timeStep * i;
-      ctx.fillText(timeLabel(t, spanMs), x(t), cssH - 12);
+      const t = g.t0 + timeStep * i;
+      ctx.fillText(timeLabel(t, spanMs), g.x(t), HEIGHT - 12);
     }
     ctx.textAlign = "left";
 
-    // Volume bars.
     const maxVol = Math.max(...points.map((p) => p.volume), 0);
-    const volTop = padT + priceH + 8;
     if (maxVol > 0) {
+      const bw = Math.max(g.plotW / points.length - 2, 1);
       for (const p of points) {
-        const h = Math.max((p.volume / maxVol) * volH, p.volume > 0 ? 1.5 : 0);
-        const rising = p.close >= p.open;
-        ctx.fillStyle = rising ? "rgba(38, 166, 154, 0.45)" : "rgba(239, 83, 80, 0.45)";
-        const bw = Math.max(plotW / points.length - 2, 1);
-        ctx.fillRect(x(p.time) - bw / 2, volTop + volH - h, bw, h);
+        const h = Math.max((p.volume / maxVol) * g.volH, p.volume > 0 ? 1.5 : 0);
+        ctx.fillStyle = p.close >= p.open ? "rgba(38, 166, 154, 0.45)" : "rgba(239, 83, 80, 0.45)";
+        ctx.fillRect(g.x(p.time) - bw / 2, g.volTop + g.volH - h, bw, h);
       }
     }
 
-    // Candles.
-    const slot = plotW / Math.max(points.length, 1);
+    const slot = g.plotW / Math.max(points.length, 1);
     const bodyW = Math.min(Math.max(slot * 0.62, 2), 22);
-    points.forEach((p, i) => {
+    for (const p of points) {
       const rising = p.close >= p.open;
       const color = rising ? UP : DOWN;
-      const cx = x(p.time);
+      const cx = g.x(p.time);
       ctx.strokeStyle = color;
       ctx.lineWidth = Math.max(bodyW * 0.18, 1);
       ctx.beginPath();
-      ctx.moveTo(cx, y(p.high));
-      ctx.lineTo(cx, y(p.low));
+      ctx.moveTo(cx, g.y(p.high));
+      ctx.lineTo(cx, g.y(p.low));
       ctx.stroke();
-      const yo = y(p.open);
-      const yc = y(p.close);
+      const yo = g.y(p.open);
+      const yc = g.y(p.close);
       ctx.fillStyle = color;
       const top = Math.min(yo, yc);
       ctx.fillRect(cx - bodyW / 2, top, bodyW, Math.max(Math.abs(yc - yo), 1.5));
-      if (hover === i) {
-        ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = 1;
-        ctx.strokeRect(cx - bodyW / 2 - 2.5, top - 2.5, bodyW + 5, Math.max(Math.abs(yc - yo), 1.5) + 5);
-      }
-    });
+    }
 
-    // Last-price line + tag.
     if (latest) {
-      const yy = Math.round(y(latest.close)) + 0.5;
-      ctx.strokeStyle = latest.close >= latest.open ? UP : DOWN;
+      const yy = Math.round(g.y(latest.close)) + 0.5;
+      const color = latest.close >= latest.open ? UP : DOWN;
+      ctx.strokeStyle = color;
       ctx.setLineDash([4, 3]);
       ctx.beginPath();
-      ctx.moveTo(padL, yy);
-      ctx.lineTo(padL + plotW, yy);
+      ctx.moveTo(g.padL, yy);
+      ctx.lineTo(g.padL + g.plotW, yy);
       ctx.stroke();
       ctx.setLineDash([]);
       const label = axisPrice(latest.close);
-      const tagW = ctx.measureText(label).width + 10;
-      ctx.fillStyle = latest.close >= latest.open ? UP : DOWN;
-      const tagY = Math.min(Math.max(yy - 9, padT), padT + priceH + volH + 8 - 18);
-      ctx.fillRect(padL + plotW + 1, tagY, padR - 2, 18);
+      ctx.fillStyle = color;
+      const tagY = Math.min(Math.max(yy - 9, g.padT), g.padT + g.priceH + g.volH + 8 - 18);
+      ctx.fillRect(g.padL + g.plotW + 1, tagY, g.padR - 2, 18);
       ctx.fillStyle = "#ffffff";
-      ctx.fillText(label, padL + plotW + 6, tagY + 9);
+      ctx.fillText(label, g.padL + g.plotW + 6, tagY + 9);
     }
+  }, [points, width, latest]);
 
-    // Crosshair.
-    if (hover !== null && points[hover]) {
-      const p = points[hover]!;
-      const cx = x(p.time);
-      const cy = y(p.close);
-      ctx.strokeStyle = CROSSHAIR;
-      ctx.setLineDash([3, 3]);
-      ctx.beginPath();
-      ctx.moveTo(cx, padT);
-      ctx.lineTo(cx, padT + priceH + volH + 8);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(padL, cy);
-      ctx.lineTo(padL + plotW + padR, cy);
-      ctx.stroke();
-      ctx.setLineDash([]);
+  // Overlay layer: crosshair only, drawn on rAF so mousemove never blocks.
+  useEffect(() => {
+    return () => cancelAnimationFrame(rafRef.current);
+  }, []);
+
+  const drawOverlay = (index: number | null) => {
+    const canvas = overlayRef.current;
+    if (!canvas) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (canvas.width !== Math.round(width * dpr)) {
+      canvas.width = Math.round(width * dpr);
+      canvas.height = Math.round(HEIGHT * dpr);
     }
-  }, [points, hover, width, latest]);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, HEIGHT);
+    const current = pointsRef.current;
+    if (index === null || !current[index]) return;
+    const g = computeGeometry(current, width);
+    if (!g) return;
+    const p = current[index]!;
+    const cx = g.x(p.time);
+    const cy = g.y(p.close);
+    ctx.strokeStyle = CROSSHAIR;
+    ctx.setLineDash([3, 3]);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx, g.padT);
+    ctx.lineTo(cx, g.padT + g.priceH + g.volH + 8);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(g.padL, cy);
+    ctx.lineTo(g.padL + g.plotW + g.padR, cy);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  };
 
-  const onMove = (event: React.MouseEvent<HTMLCanvasElement>) => {
-    if (points.length === 0 || width <= 0) return;
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const padL = 8;
-    const padR = 68;
-    const plotW = width - padL - padR;
-    const firstTime = points[0]!.time;
-    const lastTime = points.at(-1)!.time;
-    const timePad = Math.max((lastTime - firstTime) * 0.03, 60_000);
-    const t0 = firstTime - timePad * 0.4;
-    const t1 = lastTime + timePad;
-    const t = t0 + ((event.clientX - rect.left - padL) / plotW) * (t1 - t0);
+  const scheduleOverlay = (index: number | null) => {
+    cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => drawOverlay(index));
+  };
+
+  const nearestIndex = (clientX: number): number | null => {
+    const canvas = overlayRef.current;
+    const current = pointsRef.current;
+    if (!canvas || current.length === 0 || width <= 0) return null;
+    const rect = canvas.getBoundingClientRect();
+    const g = computeGeometry(current, width);
+    if (!g) return null;
+    const t = g.t0 + ((clientX - rect.left - g.padL) / g.plotW) * (g.t1 - g.t0);
     let best = 0;
     let bestDist = Infinity;
-    points.forEach((p, i) => {
-      const dist = Math.abs(p.time - t);
+    for (let i = 0; i < current.length; i += 1) {
+      const dist = Math.abs(current[i]!.time - t);
       if (dist < bestDist) {
         bestDist = dist;
         best = i;
       }
-    });
-    setHover(best);
+    }
+    return best;
+  };
+
+  const onMove = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    const index = nearestIndex(event.clientX);
+    // Avoid setState churn: only the readout re-renders, and only on change.
+    if (index !== hoverRef.current) {
+      hoverRef.current = index;
+      setHover(index);
+    }
+    scheduleOverlay(index);
+  };
+
+  const onLeave = () => {
+    hoverRef.current = null;
+    setHover(null);
+    scheduleOverlay(null);
   };
 
   return (
@@ -361,8 +431,9 @@ export function PriceHistoryChart({
               type="button"
               aria-pressed={interval === value}
               onClick={() => {
-                setInterval(value);
+                hoverRef.current = null;
                 setHover(null);
+                setInterval(value);
               }}
             >
               {value}
@@ -371,17 +442,23 @@ export function PriceHistoryChart({
         </div>
       </header>
 
-      {points.length > 0 ? (
-        <div ref={wrapRef} className="mt-4 w-full">
+      {points.length > 0 || candles.isPending ? (
+        <div ref={wrapRef} className="relative mt-4 w-full" style={{ height: HEIGHT }}>
+          <canvas ref={baseRef} className="absolute inset-0 w-full" style={{ width: "100%", height: HEIGHT }} />
           <canvas
-            ref={canvasRef}
-            className="w-full cursor-crosshair"
-            style={{ width: "100%", height: 340 }}
+            ref={overlayRef}
+            className="absolute inset-0 w-full cursor-crosshair"
+            style={{ width: "100%", height: HEIGHT }}
             onMouseMove={onMove}
-            onMouseLeave={() => setHover(null)}
+            onMouseLeave={onLeave}
             role="img"
             aria-label={`Candlestick chart, ${points.length} ${interval} candles`}
           />
+          {points.length === 0 ? (
+            <p className="absolute inset-0 m-0 grid place-items-center font-mono text-xs text-ink-muted">
+              {candles.isPending ? "Loading candles…" : "No candles for this interval yet."}
+            </p>
+          ) : null}
         </div>
       ) : (
         <p className="mt-4 border border-rule bg-raised p-6 text-center text-sm text-ink-muted">

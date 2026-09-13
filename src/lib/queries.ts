@@ -90,12 +90,15 @@ export function useRevenueEvents(tokenRef: string | null, kind: RevenueKind, ena
   });
 }
 
-export function useCandles(tokenRef: string | null, interval: CandleInterval, limit = 500) {
+export function useCandles(tokenRef: string | null, interval: CandleInterval, limit = 150) {
   return useQuery({
     queryKey: qk.candles(tokenRef ?? "", interval, limit),
     queryFn: ({ signal }) => api.listTokenCandles(tokenRef as string, { interval, limit }, signal),
     enabled: Boolean(tokenRef),
     staleTime: 30_000,
+    // Interval switches reuse the previous set instantly while the new one
+    // loads — no blank chart, no spinner flash.
+    placeholderData: (previous) => previous,
   });
 }
 

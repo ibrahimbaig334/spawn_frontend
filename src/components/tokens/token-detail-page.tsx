@@ -477,17 +477,19 @@ export function TokenDetailPage({ tokenRef }: { tokenRef: string }) {
     <main className={`${PAGE_WIDTH} pb-24`} id="main-content">
       <header className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-8 border-b-2 border-ink py-10 max-[48rem]:grid-cols-1">
         <div className="flex items-start gap-5 max-[34rem]:flex-col">
-          <span
-            className="grid size-[clamp(4rem,8vw,6rem)] shrink-0 place-items-center overflow-hidden border border-ink font-mono text-[clamp(1rem,2vw,1.5rem)] font-bold text-accent-strong"
+          <figure
+            className="m-0 grid size-[clamp(5rem,10vw,7.5rem)] shrink-0 place-items-center overflow-hidden rounded-lg border-2 border-ink bg-raised p-1.5 shadow-[5px_5px_0_0_var(--color-ink)]"
             aria-hidden="true"
           >
-            <TokenImage
-              imageUri={detail.imageUri}
-              symbol={detail.symbol}
-              className="size-full object-cover"
-              eager
-            />
-          </span>
+            <span className="grid size-full place-items-center overflow-hidden rounded-md bg-surface-strong font-mono text-[clamp(1rem,2vw,1.5rem)] font-bold text-accent-strong">
+              <TokenImage
+                imageUri={detail.imageUri}
+                symbol={detail.symbol}
+                className="size-full object-cover"
+                eager
+              />
+            </span>
+          </figure>
           <div className="min-w-0">
             <p className="m-0 font-mono text-xs font-bold tracking-[0.08em] text-accent-strong uppercase">
               {phaseLabel(detail.status)} · ${detail.symbol ?? "—"}

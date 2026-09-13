@@ -38,7 +38,7 @@ function volumeEth(item: TokenListItem): string {
 
 function TokenAvatar({ item }: { item: TokenListItem }) {
   return (
-    <span className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-full border-2 border-[#e9e7e0]/30 bg-[#14100d] text-sm font-black text-[#f5c518]">
+    <span className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-full border-2 border-ink bg-surface-strong text-sm font-black text-accent-strong">
       <TokenImage
         imageUri={item.imageUri}
         symbol={item.symbol}
@@ -52,7 +52,7 @@ function CardBanner({ imageUri }: { imageUri: string | null }) {
   const [failed, setFailed] = useState(false);
   if (failed) return null;
   return (
-    <span className="-m-4 mb-0 block h-24 overflow-hidden bg-[#14100d]" aria-hidden="true">
+    <span className="-m-4 mb-0 block h-24 overflow-hidden bg-surface-strong" aria-hidden="true">
       <TokenImage
         imageUri={imageUri}
         symbol={null}
@@ -69,7 +69,7 @@ function TokenGridCard({ item }: { item: TokenListItem }) {
   const banner = resolveImageUrl(item.imageUri);
   return (
     <Link
-      className="group grid content-start gap-3 overflow-hidden rounded-xl border-2 border-ink bg-carbon p-4 text-[#e9e7e0] no-underline transition-transform hover:-translate-y-0.5"
+      className="group grid content-start gap-3 overflow-hidden rounded-xl border-2 border-ink bg-raised p-4 text-ink no-underline transition-transform hover:-translate-y-0.5"
       href={`/tokens/${item.poolId}`}
     >
       {banner ? <CardBanner imageUri={item.imageUri} /> : null}
@@ -77,7 +77,7 @@ function TokenGridCard({ item }: { item: TokenListItem }) {
         <TokenAvatar item={item} />
         <div className="min-w-0">
           <p className="m-0 truncate text-sm font-bold">{item.name ?? "Unnamed"}</p>
-          <p className="m-0 font-mono text-xs text-[#e9e7e0]/60">
+          <p className="m-0 font-mono text-xs text-ink-muted">
             {item.symbol ?? "—"} · {relativeTime(item.launchTime)}
           </p>
         </div>
@@ -85,41 +85,41 @@ function TokenGridCard({ item }: { item: TokenListItem }) {
           className={[
             "ml-auto shrink-0 rounded-full border px-2 py-0.5 font-mono text-[0.62rem] font-bold uppercase",
             item.status === "graduated"
-              ? "border-[#3ecf6f] text-[#3ecf6f]"
-              : "border-[#f5c518] text-[#f5c518]",
+              ? "border-accent-strong text-accent-strong"
+              : "border-protocol text-protocol",
           ].join(" ")}
         >
           {item.status}
         </span>
       </div>
       <div className="flex items-baseline justify-between gap-2">
-        <span className="font-mono text-lg font-black text-[#3ecf6f]">
+        <span className="font-mono text-lg font-black text-accent-strong">
           {item.priceEth ? `${formatSubscriptPrice(item.priceEth)} ETH` : "—"}
         </span>
-        <span className="font-mono text-xs text-[#e9e7e0]/60">
+        <span className="font-mono text-xs text-ink-muted">
           ≈ ${item.priceEth ? usdApproxFromEthWei(item.priceEth).toPrecision(2) : "0"}
         </span>
       </div>
       <dl className="m-0 grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-xs">
         <div className="flex justify-between">
-          <dt className="text-[#e9e7e0]/50">MC</dt>
+          <dt className="text-ink-muted">MC</dt>
           <dd className="m-0 font-bold">{formatUsdApproxFromEthWei(item.mcapEthWei)}</dd>
         </div>
         <div className="flex justify-between">
-          <dt className="text-[#e9e7e0]/50">Vol</dt>
+          <dt className="text-ink-muted">Vol</dt>
           <dd className="m-0 font-bold">{formatCompactEth(volumeEth(item))} ETH</dd>
         </div>
         <div className="flex justify-between">
-          <dt className="text-[#e9e7e0]/50">Swaps</dt>
+          <dt className="text-ink-muted">Swaps</dt>
           <dd className="m-0 font-bold">{item.swapCount}</dd>
         </div>
       </dl>
       <div className="grid gap-1">
-        <div className="flex items-center justify-between text-[0.68rem] font-bold uppercase tracking-wide text-[#e9e7e0]/60">
+        <div className="flex items-center justify-between text-[0.68rem] font-bold uppercase tracking-wide text-ink-muted">
           <span>{phaseLabel(item.status)}</span>
           <span className="font-mono">{progress}%</span>
         </div>
-        <div className="h-2 overflow-hidden rounded-full bg-[#e9e7e0]/15">
+        <div className="h-2 overflow-hidden rounded-full bg-surface-strong">
           <span
             className="block h-full rounded-full bg-[#f5c518]"
             style={{ width: `${progress}%` }}

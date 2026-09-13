@@ -49,19 +49,19 @@ export function FeaturedTokens() {
             <li key={row.poolId}>
               <Link
                 href={`/tokens/${row.poolId}`}
-                className="grid gap-3 rounded-lg border-2 border-ink bg-carbon p-5 text-[#e9e7e0] no-underline transition-transform hover:-translate-y-1"
+                className="grid gap-3 rounded-lg border-2 border-ink bg-raised p-5 text-ink no-underline transition-transform hover:-translate-y-1"
               >
                 <span className="flex items-center justify-between">
-                  <span className="font-mono text-[0.68rem] font-black uppercase text-[#f5c518]">
+                  <span className="font-mono text-[0.68rem] font-black uppercase text-accent-strong">
                     #{index + 1} · {row.status}
                   </span>
-                  <span className="font-mono text-[0.68rem] text-[#e9e7e0]/60">
+                  <span className="font-mono text-[0.68rem] text-ink-muted">
                     {row.volume ? formatCompactEth(row.volume) : "0"} ETH / 24h
                   </span>
                 </span>
                 <span className="text-lg font-black">{row.name}</span>
-                <span className="font-mono text-sm text-[#e9e7e0]/70">${row.symbol}</span>
-                <span className="font-mono text-xs text-[#e9e7e0]/60">
+                <span className="font-mono text-sm text-ink-muted">${row.symbol}</span>
+                <span className="font-mono text-xs text-ink-muted">
                   lifetime volume {row.total ? formatCompactEth(row.total) : "0"} ETH
                 </span>
               </Link>
@@ -76,16 +76,16 @@ export function FeaturedTokens() {
             <li key={item.poolId}>
               <Link
                 href={`/tokens/${item.poolId}`}
-                className="grid gap-3 rounded-lg border-2 border-ink bg-carbon p-5 text-[#e9e7e0] no-underline transition-transform hover:-translate-y-1"
+                className="grid gap-3 rounded-lg border-2 border-ink bg-raised p-5 text-ink no-underline transition-transform hover:-translate-y-1"
               >
                 <span className="flex items-center justify-between">
-                  <span className="font-mono text-[0.68rem] font-black uppercase text-[#f5c518]">
+                  <span className="font-mono text-[0.68rem] font-black uppercase text-accent-strong">
                     new · {item.status}
                   </span>
-                  <span className="font-mono text-[0.68rem] text-[#e9e7e0]/60">{relativeTime(item.launchTime)}</span>
+                  <span className="font-mono text-[0.68rem] text-ink-muted">{relativeTime(item.launchTime)}</span>
                 </span>
                 <span className="text-lg font-black">{item.name ?? "Unnamed"}</span>
-                <span className="font-mono text-xs text-[#e9e7e0]/70">
+                <span className="font-mono text-xs text-ink-muted">
                   {item.priceEth ? `${formatSubscript(item.priceEth)} ETH` : "—"} · MC{" "}
                   {item.mcapEthWei ? formatUsdApproxFromEthWei(item.mcapEthWei) : "—"}
                 </span>

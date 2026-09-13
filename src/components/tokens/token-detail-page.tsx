@@ -255,15 +255,15 @@ function ClaimsPanel({
       <dl className="m-0 mt-4 grid grid-cols-3 gap-3 max-[56rem]:grid-cols-2 max-[34rem]:grid-cols-1 [&>div]:border [&>div]:border-rule [&>div]:bg-raised [&>div]:p-3 [&_dt]:text-xs [&_dt]:text-ink-muted [&_dd]:m-0 [&_dd]:font-mono [&_dd]:font-bold">
         <div>
           <dt>Ready to pay out</dt>
-          <dd>{data ? `${formatEth(data.pot.toString(), 4)} ETH` : "—"}</dd>
+          <dd>{data ? formatEth(formatEther(data.pot), 4) : "—"}</dd>
         </div>
         <div>
           <dt>Creator earnings</dt>
-          <dd>{data ? `${formatEth(data.creator.toString(), 4)} ETH` : "—"}</dd>
+          <dd>{data ? formatEth(formatEther(data.creator), 4) : "—"}</dd>
         </div>
         <div>
           <dt>Creator bonus share</dt>
-          <dd>{data ? `${formatEth(data.creatorPath.toString(), 4)} ETH` : "—"}</dd>
+          <dd>{data ? formatEth(formatEther(data.creatorPath), 4) : "—"}</dd>
         </div>
       </dl>
       <StatusRegion className="mt-4">

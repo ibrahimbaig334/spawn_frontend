@@ -16,7 +16,6 @@ import {
   usePrice,
   useToken,
   useTrades,
-  useRevenueEvents,
 } from "@/lib/queries";
 import { usePoolStream, type PoolStream } from "@/lib/use-pool-stream";
 import { useWallet } from "@/lib/chain/wallet";
@@ -29,7 +28,9 @@ import {
   flushPool,
   graduatePool,
 } from "@/lib/chain/trades";
-import type { RevenueEvent, RevenueKind, TradeItem } from "@/lib/api/dto";
+import type { TradeItem, WsTick } from "@/lib/api/dto";
+import { MilestoneOverview } from "@/components/visuals/milestone-overview";
+import { useTraderMap } from "@/lib/use-trader";
 import { ApiError } from "@/lib/api/client";
 import { resolveImageUrl } from "@/services/ipfs-client";
 import {
@@ -56,34 +57,6 @@ const PANEL_LABEL =
   "m-0 font-mono text-[0.68rem] font-bold tracking-[0.08em] text-accent-strong uppercase";
 const BOOKMARK =
   "h-3.5 w-2.5 border-[1.5px] border-current [clip-path:polygon(0_0,100%_0,100%_100%,50%_72%,0_100%)] forced-colors:[clip-path:none]";
-
-const REVENUE_KINDS: { value: RevenueKind; label: string; unit: "eth" | "tokens" }[] = [
-  { value: "pluginPayouts", label: "Payouts", unit: "eth" },
-  { value: "claims", label: "Claims", unit: "eth" },
-  { value: "creatorAccruals", label: "Creator earnings", unit: "eth" },
-  { value: "feeCollections", label: "Trading fees", unit: "eth" },
-  { value: "tokenBurns", label: "Burns", unit: "tokens" },
-];
-
-/** One-line, human-readable money row: amount + when + receipt link. */
-function RevenueRow({ event, unit, symbol }: { event: RevenueEvent; unit: "eth" | "tokens"; symbol: string }) {
-  const raw = event.amount ?? event.quote_fees;
-  const amount =
-    unit === "eth"
-      ? `${truncateDecimals(formatEther(wei(typeof raw === "string" ? raw : null)))} ETH`
-      : `${formatCompactEth(typeof raw === "string" ? raw : "0", 0)} ${symbol}`;
-  return (
-    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border-b border-rule py-2 text-sm">
-      <span className="min-w-0 font-mono text-xs font-bold text-ink">{amount}</span>
-      <span className="flex items-center gap-3 font-mono text-[0.68rem] text-ink-muted">
-        <a className="underline" href={explorerTx(event.transactionHash)} rel="noreferrer" target="_blank">
-          {event.transactionHash.slice(0, 10)}…
-        </a>
-        {relativeTime(event.timestamp)}
-      </span>
-    </li>
-  );
-}
 
 function Stat({ label, value, sub }: { label: string; value: ReactNode; sub?: ReactNode }) {
   return (
@@ -135,7 +108,21 @@ export function useClaimBalances(poolId: string | null) {
   });
 }
 
-function TradeTapeRow({ trade }: { trade: TradeItem }) {
+function tradeAmounts(side: "BUY" | "SELL", ethAmount: string, tokenAmount: string, symbol: string): string {
+  return side === "BUY"
+    ? `${truncateDecimals(formatEther(wei(ethAmount)))} ETH → ${formatCompactEth(tokenAmount, 0)} ${symbol}`
+    : `${formatCompactEth(tokenAmount, 0)} ${symbol} → ${truncateDecimals(formatEther(wei(ethAmount)))} ETH`;
+}
+
+function TxLink({ txHash, label }: { txHash: string; label?: string }) {
+  return (
+    <a className="underline" href={explorerTx(txHash)} rel="noreferrer" target="_blank">
+      {label ?? "tx"}
+    </a>
+  );
+}
+
+function TradeTapeRow({ trade, trader, symbol }: { trade: TradeItem; trader: string | null; symbol: string }) {
   return (
     <li className="grid grid-cols-[3.5rem_minmax(0,1fr)_auto] items-center gap-3 border-b border-rule py-2 text-sm">
       <span
@@ -146,17 +133,14 @@ function TradeTapeRow({ trade }: { trade: TradeItem }) {
       >
         {trade.side}
       </span>
-        <span className="min-w-0 font-mono text-xs">
-          <strong>
-            {trade.side === "BUY"
-              ? `${truncateDecimals(formatEther(wei(trade.ethAmount)))} ETH → ${formatCompactEth(trade.tokenAmount, 0)} tk`
-              : `${formatCompactEth(trade.tokenAmount, 0)} tk → ${truncateDecimals(formatEther(wei(trade.ethAmount)))} ETH`}
-          </strong>
-          <span className="block text-ink-muted">
-            {truncateAddress(trade.sender)} ·{" "}
-          <a className="underline" href={explorerTx(trade.transactionHash)} rel="noreferrer" target="_blank">
-            tx
-          </a>
+      <span className="min-w-0 font-mono text-xs">
+        <strong>
+          {tradeAmounts(trade.side, trade.ethAmount, trade.tokenAmount, symbol)}{" "}
+          <span className="font-semibold text-ink-muted">({formatUsdApproxFromEthWei(trade.ethAmount)})</span>
+        </strong>
+        <span className="block text-ink-muted">
+          {truncateAddress(trader ?? trade.sender)} · @ {formatSubscriptPrice(trade.priceEth)} ·{" "}
+          <TxLink txHash={trade.transactionHash} />
         </span>
       </span>
       <time className="font-mono text-[0.68rem] text-ink-muted" dateTime={trade.timestamp}>
@@ -166,11 +150,19 @@ function TradeTapeRow({ trade }: { trade: TradeItem }) {
   );
 }
 
-function LiveStreamTicks({ stream }: { stream: PoolStream }) {
-  if (stream.ticks.length === 0) return null;
+function LiveStreamTicks({
+  ticks,
+  traders,
+  symbol,
+}: {
+  ticks: WsTick[];
+  traders: Record<string, string>;
+  symbol: string;
+}) {
+  if (ticks.length === 0) return null;
   return (
     <ul className="m-0 mb-2 list-none p-0">
-      {stream.ticks.slice(0, 6).map((tick, index) => (
+      {ticks.slice(0, 6).map((tick, index) => (
         <li key={`${tick.tx}-${index}`} className="grid grid-cols-[3.5rem_minmax(0,1fr)_auto] items-center gap-3 border-b border-rule py-2 text-sm">
           <span
             className={[
@@ -182,10 +174,12 @@ function LiveStreamTicks({ stream }: { stream: PoolStream }) {
           </span>
           <span className="min-w-0 font-mono text-xs">
             <strong>
-              {truncateDecimals(formatEther(wei(tick.eth)))} ETH · {formatCompactEth(tick.tokens, 0)} tk
+              {truncateDecimals(formatEther(wei(tick.eth)))} ETH · {formatCompactEth(tick.tokens, 0)} {symbol}{" "}
+              <span className="font-semibold text-ink-muted">({formatUsdApproxFromEthWei(tick.eth)})</span>
             </strong>
             <span className="block text-ink-muted">
-              {tick.priceEth ? `${formatSubscriptPrice(tick.priceEth)} ETH` : "—"}
+              {truncateAddress(traders[tick.tx.toLowerCase()] ?? tick.tx.slice(0, 10))} ·{" "}
+              {tick.priceEth ? `${formatSubscriptPrice(tick.priceEth)}` : "—"}
             </span>
           </span>
           <span className="font-mono text-[0.68rem] font-bold text-accent-strong">LIVE</span>
@@ -415,10 +409,26 @@ export function TokenDetailPage({ tokenRef }: { tokenRef: string }) {
   const stream = usePoolStream(poolId);
   const trades = useTrades(tokenRef, { sort: "newest", limit: 40 }, 10_000);
   const milestones = useMilestones(tokenRef, token.data?.status === "graduated");
-  const [revenueKind, setRevenueKind] = useState<RevenueKind>("pluginPayouts");
-  const revenue = useRevenueEvents(tokenRef, revenueKind);
   const watchlist = useWatchlist();
   const wallet = useWallet();
+  // Stream ticks that already settled into the REST tape are hidden there so
+  // no trade ever appears twice.
+  const restTrades = trades.data?.data ?? [];
+  const restTx = useMemo(
+    () => new Set(restTrades.map((trade) => trade.transactionHash.toLowerCase())),
+    [trades.data],
+  );
+  const freshTicks = useMemo(
+    () => stream.ticks.filter((tick) => !restTx.has(tick.tx.toLowerCase())),
+    [stream.ticks, restTx],
+  );
+  const tickTxHashes = useMemo(() => {
+    const hashes = new Set<string>();
+    for (const trade of restTrades) hashes.add(trade.transactionHash);
+    for (const tick of freshTicks) hashes.add(tick.tx);
+    return [...hashes];
+  }, [restTrades, freshTicks]);
+  const traders = useTraderMap(wallet.publicClient, tickTxHashes);
 
   const detail = token.data;
   const graduationNext = Boolean(
@@ -594,12 +604,21 @@ export function TokenDetailPage({ tokenRef }: { tokenRef: string }) {
           </dl>
 
           {detail.status === "bonding" ? (
-            <Progress
-              className="mb-8 mt-8"
-              label="Progress to graduation"
-              value={progress * 100}
-              valueLabel={`${(progress * 100).toFixed(2)}%`}
-            />
+            <>
+              <Progress
+                className="mb-8 mt-8"
+                label="Progress to graduation"
+                value={progress * 100}
+                valueLabel={`${(progress * 100).toFixed(2)}%`}
+              />
+              <div className="mb-8">
+                <MilestoneOverview
+                  completedMilestones={detail.milestones.completed}
+                  progressBps={Math.round(progress * 10_000)}
+                  title="Milestones after graduation"
+                />
+              </div>
+            </>
           ) : (
             <p className="mt-8 mb-0 text-xs font-bold text-ink-muted">
               Graduated — trading continues on the permanent market ({detail.milestones.completed} milestones
@@ -611,22 +630,31 @@ export function TokenDetailPage({ tokenRef }: { tokenRef: string }) {
 
           <Section
             id="tape"
-            title="Trade tape"
+            title="Trades"
             aside={
               <span className="font-mono text-xs text-ink-muted" role="status">
-                {stream.connected ? "live stream connected" : "stream reconnecting — REST tape below"}
+                {stream.connected ? "live" : "reconnecting…"}
               </span>
             }
           >
-            <LiveStreamTicks stream={stream} />
-            {(trades.data?.data ?? []).length === 0 && stream.ticks.length === 0 ? (
+            <LiveStreamTicks
+              ticks={freshTicks}
+              traders={traders}
+              symbol={detail.symbol ?? "tokens"}
+            />
+            {restTrades.length === 0 && freshTicks.length === 0 ? (
               <p className="border border-rule bg-raised p-6 text-center text-sm text-ink-muted">
                 No swaps recorded yet.
               </p>
             ) : (
               <ul className="m-0 list-none p-0">
-                {(trades.data?.data ?? []).map((trade) => (
-                  <TradeTapeRow key={`${trade.transactionHash}-${trade.logIndex}`} trade={trade} />
+                {restTrades.map((trade) => (
+                  <TradeTapeRow
+                    key={`${trade.transactionHash}-${trade.logIndex}`}
+                    trade={trade}
+                    trader={traders[trade.transactionHash.toLowerCase()] ?? null}
+                    symbol={detail.symbol ?? "tokens"}
+                  />
                 ))}
               </ul>
             )}
@@ -638,6 +666,18 @@ export function TokenDetailPage({ tokenRef }: { tokenRef: string }) {
                 Milestones pay out as the price climbs. Every payout splits between the chosen
                 plugins and the creator.
               </p>
+              <MilestoneOverview
+                completedMilestones={detail.milestones.completed}
+                progressBps={
+                  detail.milestones.live > 0
+                    ? Math.round(
+                        ((detail.milestones.completed + 0.5) / 22) * 10_000,
+                      )
+                    : Math.round((detail.milestones.completed / 22) * 10_000)
+                }
+                title="Milestone progress"
+                className="mb-6"
+              />
               <MilestoneSchedule
                 graduationLevel={detail.graduationLevel ?? 0}
                 milestones={milestones.data?.data ?? []}
@@ -656,48 +696,6 @@ export function TokenDetailPage({ tokenRef }: { tokenRef: string }) {
               graduated={detail.status === "graduated"}
               isHolder={isNftHolder}
             />
-          </Section>
-
-          <Section
-            id="revenue"
-            title="Money flow"
-            aside={
-              <div className="flex flex-wrap gap-1" role="group" aria-label="Revenue event kind">
-                {REVENUE_KINDS.map((kind) => (
-                  <button
-                    key={kind.value}
-                    type="button"
-                    aria-pressed={revenueKind === kind.value}
-                    className={[
-                      "min-h-8 cursor-pointer rounded-sm border px-2 py-1 text-xs font-bold",
-                      revenueKind === kind.value
-                        ? "border-ink bg-ink text-inverse"
-                        : "border-rule text-ink-muted",
-                    ].join(" ")}
-                    onClick={() => setRevenueKind(kind.value)}
-                  >
-                    {kind.label}
-                  </button>
-                ))}
-              </div>
-            }
-          >
-            {revenue.data && revenue.data.data.length > 0 ? (
-              <ul className="m-0 list-none border-t border-rule p-0">
-                {(revenue.data.data as RevenueEvent[]).map((event, index) => (
-                  <RevenueRow
-                    key={`${event.transactionHash}-${event.logIndex}-${index}`}
-                    event={event}
-                    unit={REVENUE_KINDS.find((kind) => kind.value === revenueKind)?.unit ?? "eth"}
-                    symbol={detail.symbol ?? "tokens"}
-                  />
-                ))}
-              </ul>
-            ) : (
-              <p className="border border-rule bg-raised p-6 text-center text-sm text-ink-muted">
-                Nothing here yet — payouts, claims, and fees appear as they happen.
-              </p>
-            )}
           </Section>
 
           <Section id="comments" title="Discussion">

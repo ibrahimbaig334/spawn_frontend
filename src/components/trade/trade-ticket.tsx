@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatEther, parseEther, erc20Abi, type Address } from "viem";
 import { Button, Dialog, SelectField, StatusMessage, StatusRegion } from "@/components/ui";
 import { qk, usePrice, useQuote } from "@/lib/queries";
+import { quoteTokenSwap } from "@/lib/api/endpoints";
 import { useWallet } from "@/lib/chain/wallet";
 import { useProtocol } from "@/lib/chain/protocol-context";
 import { executeSwap } from "@/lib/chain/trades";
@@ -38,6 +39,7 @@ export function TradeTicket({ tokenRef, token, symbol, status, farLevel }: Trade
   const [amountText, setAmountText] = useState("");
   const [slippageBps, setSlippageBps] = useState<number>(100);
   const [confirming, setConfirming] = useState(false);
+  const [resolvingMax, setResolvingMax] = useState(false);
   const [phase, setPhase] = useState<"idle" | "approving" | "submitting" | "pending" | "done">("idle");
   const [error, setError] = useState<string | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
@@ -89,6 +91,50 @@ export function TradeTicket({ tokenRef, token, symbol, status, farLevel }: Trade
     setError(null);
     setTxHash(null);
   }, []);
+
+  /**
+   * Smart MAX: the largest buy the market currently quotes, never more than
+   * the wallet can spend. Binary-searches the quote endpoint (local, fast)
+   * from the spendable balance down, keeping a gas reserve aside.
+   */
+  const useMax = useCallback(async () => {
+    if (side === "sell") {
+      setAmountText(formatEther(tokenBalance.data ?? 0n));
+      return;
+    }
+    setResolvingMax(true);
+    try {
+      const gasReserve = parseEther("0.005");
+      let hi = ethBalanceWei > gasReserve ? ethBalanceWei - gasReserve : 0n;
+      if (hi <= 0n) {
+        setAmountText("0");
+        return;
+      }
+      const quotable = async (amount: bigint): Promise<boolean> => {
+        if (amount <= 0n) return true;
+        try {
+          await quoteTokenSwap(tokenRef, { side: "BUY", amount: amount.toString() });
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      if (await quotable(hi)) {
+        setAmountText(formatEther(hi));
+        return;
+      }
+      let lo = 0n;
+      for (let i = 0; i < 14 && hi - lo > 1n; i += 1) {
+        const mid = (lo + hi) / 2n;
+        if (mid <= 0n) break;
+        if (await quotable(mid)) lo = mid;
+        else hi = mid;
+      }
+      setAmountText(formatEther(lo));
+    } finally {
+      setResolvingMax(false);
+    }
+  }, [side, ethBalanceWei, tokenBalance.data, tokenRef]);
 
   const router = routerAddress();
 
@@ -214,17 +260,12 @@ export function TradeTicket({ tokenRef, token, symbol, status, farLevel }: Trade
             onChange={(event) => setAmountText(event.target.value.replace(/[^0-9.]/g, ""))}
           />
           <button
-            className="mx-2 my-2 shrink-0 cursor-pointer rounded-sm border border-ink bg-transparent px-2 text-xs font-bold text-ink hover:bg-ink hover:text-inverse"
+            className="mx-2 my-2 shrink-0 cursor-pointer rounded-sm border border-ink bg-transparent px-2 text-xs font-bold text-ink hover:bg-ink hover:text-inverse disabled:cursor-wait disabled:opacity-50"
             type="button"
-            onClick={() => {
-              if (side === "buy") {
-                setAmountText(formatEther((ethBalanceWei > 2_000_000_000_000_000n ? ethBalanceWei - 2_000_000_000_000_000n : 0n)));
-              } else {
-                setAmountText(formatEther(tokenBalance.data ?? 0n));
-              }
-            }}
+            disabled={resolvingMax}
+            onClick={() => void useMax()}
           >
-            MAX
+            {resolvingMax ? "…" : "MAX"}
           </button>
         </div>
         {side === "buy" ? (
@@ -247,7 +288,8 @@ export function TradeTicket({ tokenRef, token, symbol, status, farLevel }: Trade
         <p className="font-mono text-xs text-ink-muted" role="status">Fetching on-chain quote…</p>
       ) : amountValid && quote.isError ? (
         <StatusMessage tone="error" title="Quote failed">
-          {(quote.error as Error).message}
+          That amount can&apos;t be quoted right now — it is more than the market can fill or
+          more than your wallet can spend. Try a smaller amount{side === "buy" ? ", or tap MAX" : ""}.
         </StatusMessage>
       ) : quoteOut !== null ? (
         <p className="font-mono text-sm font-bold text-ink">

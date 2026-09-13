@@ -639,7 +639,7 @@ export function LaunchConfigurator() {
                 </div>
               ) : (
                 <>
-                  <dl className="m-0 grid grid-cols-2 gap-x-6 gap-y-3 border-y border-rule py-4 text-sm max-[40rem]:grid-cols-1 [&_dt]:text-xs [&_dt]:text-ink-muted [&_dd]:m-0 [&_dd]:font-mono [&_dd]:font-bold">
+                  <dl className="m-0 grid grid-cols-2 gap-x-6 gap-y-3 border-y border-rule py-4 text-sm max-[40rem]:grid-cols-1 [&>div]:min-w-0 [&_dt]:text-xs [&_dt]:text-ink-muted [&_dd]:m-0 [&_dd]:font-mono [&_dd]:font-bold [&_dd]:overflow-wrap-anywhere">
                     <div>
                       <dt>Supply</dt>
                       <dd>1,000,000,000 {draft.symbol || "tokens"}</dd>

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState, type FormEvent } from "react";
 import { useTokenList } from "@/lib/queries";
 import type { TokenListItem } from "@/lib/api/dto";
@@ -147,6 +147,15 @@ function TokenRow({ item }: { item: TokenListItem }) {
 
 export function TokenDirectory() {
   const params = useSearchParams();
+  const pathname = usePathname();
+  const router = useRouter();
+  // Client-side param updates (no full page reload): the list refetches in
+  // place via react-query.
+  const replaceParams = (next: URLSearchParams) => {
+    const qs = next.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    setPage(1);
+  };
   const query = useMemo(
     () => ({
       q: params.get("q") ?? undefined,
@@ -168,7 +177,7 @@ export function TokenDirectory() {
     const q = String(form.get("q") ?? "").trim();
     if (q) next.set("q", q);
     else next.delete("q");
-    window.location.search = next.toString();
+    replaceParams(next);
   }
 
   const total = list.data?.meta.total ?? 0;
@@ -188,6 +197,7 @@ export function TokenDirectory() {
             <input
               aria-label="Search tokens"
               className="min-h-target min-w-0 flex-1 rounded-l-sm border-2 border-r-0 border-ink bg-raised px-3 py-2 text-ink"
+              key={search}
               defaultValue={search}
               name="q"
               placeholder="Search name or symbol"
@@ -209,7 +219,7 @@ export function TokenDirectory() {
               const next = new URLSearchParams(params.toString());
               if (event.target.value) next.set("phase", event.target.value);
               else next.delete("phase");
-              window.location.search = next.toString();
+              replaceParams(next);
             }}
           >
             <option value="">All phases</option>
@@ -225,7 +235,7 @@ export function TokenDirectory() {
             onChange={(event) => {
               const next = new URLSearchParams(params.toString());
               next.set("sort", event.target.value);
-              window.location.search = next.toString();
+              replaceParams(next);
             }}
           >
             <option value="newest">Newest</option>

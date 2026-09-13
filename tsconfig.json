@@ -33,5 +33,7 @@
     "playwright.config.ts",
     ".next/dev/types/**/*.ts"
   ],
-  "exclude": ["node_modules"]
+  // CustomChart.tsx is a third-party reference snippet (missing deps on
+  // purpose); it is not part of the app build.
+  "exclude": ["node_modules", "CustomChart.tsx"]
 }

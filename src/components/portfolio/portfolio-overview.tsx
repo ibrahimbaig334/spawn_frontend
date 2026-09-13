@@ -5,7 +5,7 @@ import { erc20Abi, type Address } from "viem";
 import { useQuery } from "@tanstack/react-query";
 import { Button, StatusMessage } from "@/components/ui";
 import { useWallet } from "@/lib/chain/wallet";
-import { useProfileTokens, useRevenueStreams, useLaunchRecords } from "@/lib/queries";
+import { useProfileTokens, useRevenueStreams, useLaunchRecords, useTokenList } from "@/lib/queries";
 import { usePoolCards } from "@/lib/use-pool-cards";
 import { useWatchlist } from "@/lib/watchlist";
 import { formatCompactEth, wei } from "@/lib/display";
@@ -20,10 +20,14 @@ export function PortfolioOverview() {
 
   const created = useProfileTokens(address);
   const streams = useRevenueStreams(address);
+  // Every known pool is balance-checked: holdings are not limited to tokens
+  // the wallet created or watchlisted (a plain buy would otherwise vanish).
+  const listed = useTokenList({ sort: "newest", limit: 100 }, Boolean(address));
 
   const poolIds = Array.from(
     new Set([
       ...(created.data?.data.map((t) => t.poolId) ?? []),
+      ...(listed.data?.data.map((t) => t.poolId) ?? []),
       ...watchlist.poolIds,
     ]),
   );
@@ -102,7 +106,7 @@ export function PortfolioOverview() {
           <dd>{wallet.ethBalance ? `${truncateDecimals(wallet.ethBalance)} ETH` : "—"}</dd>
         </div>
         <div>
-          <dt>Position value (watched + created pools)</dt>
+          <dt>Position value</dt>
           <dd>{formatCompactEth(totalValue.toString(), 4)} ETH</dd>
         </div>
         <div>
@@ -125,7 +129,7 @@ export function PortfolioOverview() {
         </header>
         {holdings.length === 0 ? (
           <div className={EMPTY}>
-            <h3>No positions in watched or created pools.</h3>
+            <h3>No token positions.</h3>
             <p>
               <Link href="/tokens">Find a market</Link> and trade — balances show here automatically.
             </p>

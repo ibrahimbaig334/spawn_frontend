@@ -30,13 +30,14 @@ export const APP_ENV = {
     "https://mainnet.base.org",
   ),
   /**
-   * Uniswap v4 Universal Router for on-chain swaps. Empty unless explicitly
-   * configured per chain: a mainnet default here would point at an address
-   * with nothing deployed (and a wrong checksum crashes viem outright).
+   * Per-chain swap router for on-chain trades (SpawnSwapRouter). Empty unless
+   * explicitly configured: an address with nothing deployed behind it (or a
+   * bad checksum) must disable trading, never crash it.
    */
-  universalRouterAddress: required(
-    "NEXT_PUBLIC_UNIVERSAL_ROUTER_ADDRESS",
-    process.env.NEXT_PUBLIC_UNIVERSAL_ROUTER_ADDRESS,
+  swapRouterAddress: required(
+    "NEXT_PUBLIC_SWAP_ROUTER_ADDRESS",
+    process.env.NEXT_PUBLIC_SWAP_ROUTER_ADDRESS ??
+      process.env.NEXT_PUBLIC_UNIVERSAL_ROUTER_ADDRESS,
     "",
   ),
   explorerBase: required(
@@ -66,7 +67,7 @@ export function explorerAddress(address: string): string {
  * sending to an undeployed/mistyped router is what crashed viem outright.
  */
 export function routerAddress(): Address | null {
-  const raw = APP_ENV.universalRouterAddress.trim();
+  const raw = APP_ENV.swapRouterAddress.trim();
   if (!raw) return null;
   try {
     return getAddress(raw);

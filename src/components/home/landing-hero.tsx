@@ -58,7 +58,7 @@ export function LandingHero() {
           </div>
           <div>
             <dt>Graduation at</dt>
-            <dd>≈4x (level +13,862)</dd>
+            <dd>≈4x opening price</dd>
           </div>
           <div>
             <dt>Trading fee</dt>
@@ -66,9 +66,8 @@ export function LandingHero() {
           </div>
         </dl>
         <p className="m-0 border-l-[3px] border-accent bg-paper p-3 text-sm text-ink-muted">
-          Harvested bands fund the payout pot: 10% service fee, 90% to the pot.
-          A flush delivers the pot — 1% tip to the flusher, plugin shares in
-          registry order, remainder to the creator.
+          Milestone payouts land in a shared pot first: 10% service fee, then the
+          rest splits between the token&apos;s plugins and its creator.
         </p>
       </div>
     </section>

@@ -4,8 +4,6 @@ import Link from "next/link";
 import { useState } from "react";
 import {
   useEconomics,
-  useGovernance,
-  useKeeperJobs,
   usePayoutPlugins,
   useProtocolAddresses,
   useProtocolRevenue,
@@ -13,7 +11,7 @@ import {
   useRevenueHistory,
   useWatermark,
 } from "@/lib/queries";
-import { formatCompactEth, formatUtc, wei } from "@/lib/display";
+import { formatCompactEth, formatUsdApproxFromEthWei, relativeTime, wei } from "@/lib/display";
 import { truncateDecimals } from "@/lib/format";
 import { StatusMessage, StatusRegion } from "@/components/ui";
 import { ApiError } from "@/lib/api/client";
@@ -37,203 +35,126 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
   );
 }
 
+/** Friendly plugin name; on-chain identity stays out of the UI. */
+function pluginName(plugin: string, buyback: string | null | undefined): string {
+  if (buyback && plugin.toLowerCase() === buyback.toLowerCase()) return "Buyback & burn";
+  return "Payout plugin";
+}
+
 export function ProtocolDashboard() {
-  const addresses = useProtocolAddresses();
   const economics = useEconomics();
   const plugins = usePayoutPlugins();
-  const governance = useGovernance();
   const revenue = useProtocolRevenue();
   const stats = useProtocolStats();
   const watermark = useWatermark();
-  const jobs = useKeeperJobs({ limit: 25 });
+  // Only the buyback address is read (to name the plugin); nothing on-chain
+  // is displayed.
+  const addresses = useProtocolAddresses();
+  const buyback = addresses.data?.buybackAndBurnPlugin ?? null;
 
   return (
     <main className={`${PAGE} py-12 pb-24`} id="main-content">
       <header className="mb-8 border-b-2 border-ink pb-6">
         <p className="m-0 font-mono text-[0.68rem] font-bold uppercase tracking-[0.08em] text-accent-strong">
-          Chain state
+          How Spawn works
         </p>
         <h1 className="my-2 text-[clamp(2rem,5vw,3.25rem)] font-black tracking-[-0.04em]">
           Protocol
         </h1>
         <p className="m-0 max-w-2xl text-ink-muted">
-          The single source of truth this frontend consumes: deployment addresses, live economics,
-          the plugin registry, governance, and the indexer watermark. Nothing here is hardcoded.
+          Every token launches on the same terms: a fixed supply, a 1% trading fee, and
+          milestone payouts that split between plugins and the creator.
         </p>
       </header>
 
       <StatusRegion className="mb-6">
-        {addresses.error instanceof ApiError && addresses.error.code === "MANIFEST_NOT_SYNCED" ? (
-          <StatusMessage tone="warning" title="No deployment manifest">
-            Contracts are not deployed/synced for this chain — launch endpoints will return
-            <code> PROTOCOL_NOT_DEPLOYED</code>. Browsing and read-only data keep working.
+        {watermark.error instanceof ApiError && watermark.error.code === "WATERMARK_NOT_FOUND" ? (
+          <StatusMessage tone="warning" title="Still syncing">
+            Market data is still loading for the first time — check back in a minute.
           </StatusMessage>
         ) : null}
       </StatusRegion>
 
       <div className="grid grid-cols-2 gap-5 max-[60rem]:grid-cols-1">
-        <Card title="Deployment addresses">
-          {addresses.data ? (
+        <Card title="Fee split">
+          {economics.data ? (
             <ul className="m-0 grid list-none gap-1 p-0 font-mono text-xs">
-              {Object.entries({ ...addresses.data, chainId: undefined }).map(([key, value]) =>
-                typeof value === "string" ? (
-                  <li key={key} className="flex justify-between gap-3 border-b border-rule py-1">
-                    <span className="text-ink-muted">{key}</span>
-                    <a className="truncate underline" href={`https://basescan.org/address/${value}`} target="_blank" rel="noreferrer">
-                      {value}
-                    </a>
-                  </li>
-                ) : null,
-              )}
+              <li className="flex justify-between"><span className="text-ink-muted">trading fee</span><strong>1%</strong></li>
+              <li className="flex justify-between"><span className="text-ink-muted">milestone service fee</span><strong>{wadPercent(economics.data.current.harvestServiceFeeWad)}</strong></li>
+              <li className="flex justify-between"><span className="text-ink-muted">trade revenue → creator</span><strong>{wadPercent(economics.data.current.quoteCreatorShareWad)}</strong></li>
+              <li className="flex justify-between"><span className="text-ink-muted">token revenue → milestones</span><strong>{wadPercent(economics.data.current.tokenMilestoneFundShareWad)}</strong></li>
             </ul>
           ) : (
             <p className="m-0 text-sm text-ink-muted">Loading…</p>
           )}
         </Card>
 
-        <Card title="Indexer watermark">
-          {watermark.data ? (
-            <ul className="m-0 grid list-none gap-1 p-0 font-mono text-xs">
-              <li className="flex justify-between"><span className="text-ink-muted">committed block</span><strong>{Number(watermark.data.blockNumber).toLocaleString()}</strong></li>
-              <li className="flex justify-between"><span className="text-ink-muted">block time</span><strong>{formatUtc(watermark.data.blockTime)}</strong></li>
-              <li className="flex justify-between"><span className="text-ink-muted">last indexed</span><strong>{watermark.data.lastIndexedBlock ? Number(watermark.data.lastIndexedBlock).toLocaleString() : "—"}</strong></li>
-              <li className="flex justify-between"><span className="text-ink-muted">economics v</span><strong>{watermark.data.committedVersion}</strong></li>
-              <li className="flex justify-between"><span className="text-ink-muted">trusted operator</span><strong>{watermark.data.trustedOperator ? `${watermark.data.trustedOperator.slice(0, 12)}…` : "—"}</strong></li>
-            </ul>
-          ) : (
-            <p className="m-0 text-sm text-ink-muted">
-              {watermark.error instanceof ApiError && watermark.error.code === "WATERMARK_NOT_FOUND"
-                ? "The indexer has not committed its first block yet."
-                : "Loading…"}
-            </p>
-          )}
-          <div className="flex gap-3 text-xs font-bold">
-            <Link className="underline" href="/tokens">Markets →</Link>
-          </div>
-        </Card>
-
-        <Card title="Economics (live tuple)">
-          {economics.data ? (
-            <ul className="m-0 grid list-none gap-1 p-0 font-mono text-xs">
-              <li className="flex justify-between"><span className="text-ink-muted">version</span><strong>{economics.data.current.version}</strong></li>
-              <li className="flex justify-between"><span className="text-ink-muted">harvest service fee</span><strong>{wadPercent(economics.data.current.harvestServiceFeeWad)} / cap {wadPercent(economics.data.caps.harvestServiceFeeWad.max)}</strong></li>
-              <li className="flex justify-between"><span className="text-ink-muted">quote → creator</span><strong>{wadPercent(economics.data.current.quoteCreatorShareWad)} / cap {wadPercent(economics.data.caps.quoteCreatorShareWad.max)}</strong></li>
-              <li className="flex justify-between"><span className="text-ink-muted">token fees → ladder</span><strong>{wadPercent(economics.data.current.tokenMilestoneFundShareWad)} / cap {wadPercent(economics.data.caps.tokenMilestoneFundShareWad.max)}</strong></li>
-              <li className="flex justify-between"><span className="text-ink-muted">source</span><strong>{economics.data.source}</strong></li>
-            </ul>
-          ) : (
-            <p className="m-0 text-sm text-ink-muted">
-              {economics.error instanceof ApiError && economics.error.code === "ECONOMICS_NOT_AVAILABLE"
-                ? "No economic config recorded yet."
-                : "Loading…"}
-            </p>
-          )}
-        </Card>
-
-        <Card title="Protocol revenue">
+        <Card title="Protocol earnings">
           {revenue.data?.totals ? (
             <ul className="m-0 grid list-none gap-1 p-0 font-mono text-xs">
-              <li className="flex justify-between"><span className="text-ink-muted">accrued</span><strong>{formatCompactEth(revenue.data.totals.accrued)} ETH</strong></li>
-              <li className="flex justify-between"><span className="text-ink-muted">curve / fees / harvest</span><strong>{formatCompactEth(revenue.data.totals.curve, 0)} / {formatCompactEth(revenue.data.totals.swapFees, 0)} / {formatCompactEth(revenue.data.totals.harvestFees, 0)}</strong></li>
-              <li className="flex justify-between"><span className="text-ink-muted">claimed</span><strong>{formatCompactEth(revenue.data.totals.claimed)} ETH</strong></li>
-              {revenue.data.live ? (
-                <li className="flex justify-between"><span className="text-ink-muted">claimable (live)</span><strong>{formatCompactEth(revenue.data.live.protocolClaimable)} ETH</strong></li>
-              ) : null}
+              <li className="flex justify-between"><span className="text-ink-muted">earned</span><strong>{formatUsdApproxFromEthWei(revenue.data.totals.accrued)}</strong></li>
+              <li className="flex justify-between"><span className="text-ink-muted">claimed</span><strong>{formatUsdApproxFromEthWei(revenue.data.totals.claimed)}</strong></li>
             </ul>
           ) : (
-            <p className="m-0 text-sm text-ink-muted">No protocol revenue accrued yet.</p>
+            <p className="m-0 text-sm text-ink-muted">No protocol earnings yet.</p>
           )}
         </Card>
 
-        <Card title={`Payout plugin registry (${plugins.data?.length ?? 0})`}>
+        <Card title={`Payout plugins (${plugins.data?.length ?? 0})`}>
           {plugins.data && plugins.data.length > 0 ? (
             <ul className="m-0 list-none p-0 font-mono text-xs">
-              <li className="grid grid-cols-[2.5rem_minmax(0,1fr)_4rem_3rem_4.5rem] gap-2 border-b-2 border-ink py-1 font-bold">
-                <span>#</span><span>plugin</span><span>take</span><span>role</span><span>state</span>
-              </li>
-              {plugins.data.map((entry) => (
-                <li key={entry.registryIndex} className="grid grid-cols-[2.5rem_minmax(0,1fr)_4rem_3rem_4.5rem] items-center gap-2 border-b border-rule py-1">
-                  <span>{entry.registryIndex}</span>
-                  <span className="truncate">{entry.plugin}</span>
-                  <span>{truncateDecimals(Number(wei(entry.takeWad)) / 1e16)}</span>
-                  <span>{entry.role}</span>
-                  <span className={entry.suspended ? "text-error" : "text-accent-strong"}>
-                    {entry.suspended ? "suspended" : "active"}
-                  </span>
-                </li>
-              ))}
+              {plugins.data
+                .filter((entry) => entry.role === "PAYOUT" && !entry.suspended)
+                .map((entry) => (
+                  <li key={entry.registryIndex} className="flex items-center justify-between gap-2 border-b border-rule py-1.5">
+                    <span className="font-bold">{pluginName(entry.plugin, buyback)}</span>
+                    <span className="text-ink-muted">takes {wadPercent(entry.takeWad)} of each payout</span>
+                  </li>
+                ))}
             </ul>
           ) : (
-            <p className="m-0 text-sm text-ink-muted">Registry mirror is empty until the indexer syncs.</p>
-          )}
-        </Card>
-
-        <Card title="Governance">
-          {governance.data?.state ? (
-            <ul className="m-0 grid list-none gap-1 p-0 font-mono text-xs">
-              <li className="flex justify-between"><span className="text-ink-muted">economic version</span><strong>{governance.data.state.economicVersion}</strong></li>
-              <li className="flex justify-between"><span className="text-ink-muted">protocol recipient</span><strong>{governance.data.state.protocolRecipient.slice(0, 12)}…</strong></li>
-              <li className="flex justify-between"><span className="text-ink-muted">trusted operator</span><strong>{governance.data.state.trustedOperator.slice(0, 12)}…</strong></li>
-              <li className="flex justify-between"><span className="text-ink-muted">administrator</span><strong>{governance.data.state.administrator.slice(0, 12)}…</strong></li>
-              <li className="flex justify-between"><span className="text-ink-muted">delay</span><strong>{governance.data.state.governanceDelaySeconds ? `${Number(governance.data.state.governanceDelaySeconds) / 3600}h` : "—"}</strong></li>
-            </ul>
-          ) : (
-            <p className="m-0 text-sm text-ink-muted">No governance state indexed yet.</p>
-          )}
-          {governance.data && governance.data.operations.length > 0 ? (
-            <ul className="m-0 mt-2 grid list-none gap-1 border-t border-rule p-0 pt-2 font-mono text-[0.68rem]">
-              {governance.data.operations.slice(0, 5).map((operation) => (
-                <li key={operation.operationId} className="flex justify-between gap-2">
-                  <span className="truncate">{operation.action} · {operation.status}</span>
-                  <span className="text-ink-muted">{relativeDay(operation.readyAt)}</span>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </Card>
-
-        <Card title="Keeper jobs (backend-computed)">
-          {jobs.data && jobs.data.jobs.length > 0 ? (
-            <ul className="m-0 list-none p-0 font-mono text-xs">
-              {jobs.data.jobs.slice(0, 10).map((job, index) => (
-                <li key={`${job.kind}-${job.poolId}-${index}`} className="flex flex-wrap items-center justify-between gap-2 border-b border-rule py-1.5">
-                  <span className="font-bold uppercase">{job.kind}</span>
-                  <Link className="truncate underline" href={`/tokens/${job.poolId}`}>{job.poolId.slice(0, 16)}…</Link>
-                  {job.incentiveWei ? <span className="text-accent-strong">tip {formatCompactEth(job.incentiveWei, 4)} ETH</span> : null}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="m-0 text-sm text-ink-muted">No keeper signals pending — pots empty, no graduations due.</p>
+            <p className="m-0 text-sm text-ink-muted">The plugin list is still loading.</p>
           )}
           <p className="m-0 text-xs text-ink-muted">
-            flushTo / graduate / collectFees are permissionless; zero-work calls are no-op successes.
+            Creators pick plugins at launch; whatever is left always goes to the creator.
           </p>
         </Card>
 
-        <Card title="Global revenue history">
+        <Card title="Data status">
+          {watermark.data ? (
+            <ul className="m-0 grid list-none gap-1 p-0 font-mono text-xs">
+              <li className="flex justify-between"><span className="text-ink-muted">status</span><strong className="text-accent-strong">up to date</strong></li>
+              <li className="flex justify-between"><span className="text-ink-muted">last update</span><strong>{relativeTime(watermark.data.blockTime)}</strong></li>
+            </ul>
+          ) : (
+            <p className="m-0 text-sm text-ink-muted">Loading…</p>
+          )}
+          <div className="flex gap-3 text-xs font-bold">
+            <Link className="underline" href="/tokens">Browse markets →</Link>
+          </div>
+        </Card>
+
+        <Card title="Recent payouts">
           <RevenueHistoryCard />
         </Card>
 
-        <Card title="60-day activity">
+        <Card title="Recent activity">
           {stats.data && stats.data.daily.length > 0 ? (
             <ul className="m-0 list-none p-0 font-mono text-xs">
-              <li className="grid grid-cols-[4.5rem_1fr_1fr_4rem_5rem_5rem] gap-2 border-b-2 border-ink py-1 font-bold">
-                <span>day</span><span>buy</span><span>sell</span><span>swaps</span><span>creator</span><span>grad</span>
+              <li className="grid grid-cols-[4.5rem_1fr_1fr_4rem] gap-2 border-b-2 border-ink py-1 font-bold">
+                <span>day</span><span>bought</span><span>sold</span><span>trades</span>
               </li>
               {stats.data.daily.slice(0, 14).map((day) => (
-                <li key={day.day} className="grid grid-cols-[4.5rem_1fr_1fr_4rem_5rem_5rem] gap-2 border-b border-rule py-1">
+                <li key={day.day} className="grid grid-cols-[4.5rem_1fr_1fr_4rem] gap-2 border-b border-rule py-1">
                   <span>{day.day.slice(0, 10)}</span>
-                  <span>{formatCompactEth(day.buyVolumeEth, 1)}</span>
-                  <span>{formatCompactEth(day.sellVolumeEth, 1)}</span>
+                  <span>{formatCompactEth(day.buyVolumeEth, 1)} ETH</span>
+                  <span>{formatCompactEth(day.sellVolumeEth, 1)} ETH</span>
                   <span>{day.swapCount}</span>
-                  <span>{formatCompactEth(day.creatorRevenueEth, 1)}</span>
-                  <span>{day.graduationCount}</span>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="m-0 text-sm text-ink-muted">No daily aggregates yet.</p>
+            <p className="m-0 text-sm text-ink-muted">No trading activity yet.</p>
           )}
         </Card>
       </div>
@@ -241,39 +162,35 @@ export function ProtocolDashboard() {
   );
 }
 
-function relativeDay(iso: string | null): string {
-  if (!iso) return "—";
-  return iso.slice(0, 10);
-}
-
-const HISTORY_KINDS = ["creator", "protocol", "claims", "tips", "pluginPayouts", "pots"] as const;
+const HISTORY_OPTIONS = [
+  { value: "pluginPayouts", label: "Payouts" },
+  { value: "claims", label: "Claims" },
+  { value: "creator", label: "Creator earnings" },
+  { value: "protocol", label: "Protocol earnings" },
+] as const;
 
 function RevenueHistoryCard() {
-  const [kind, setKind] = useState<(typeof HISTORY_KINDS)[number]>("protocol");
+  const [kind, setKind] = useState<(typeof HISTORY_OPTIONS)[number]["value"]>("pluginPayouts");
   const history = useRevenueHistory(kind);
   const rows = history.data?.data ?? [];
   return (
     <div className="grid gap-3">
-      <div className="flex flex-wrap gap-1" role="group" aria-label="History kind">
-        {HISTORY_KINDS.map((option) => (
+      <div className="flex flex-wrap gap-1" role="group" aria-label="Payout kind">
+        {HISTORY_OPTIONS.map((option) => (
           <button
-            key={option}
+            key={option.value}
             type="button"
-            aria-pressed={kind === option}
+            aria-pressed={kind === option.value}
             className={[
               "min-h-8 cursor-pointer rounded-sm border px-2 py-1 text-xs font-bold",
-              kind === option ? "border-ink bg-ink text-inverse" : "border-rule text-ink-muted",
+              kind === option.value ? "border-ink bg-ink text-inverse" : "border-rule text-ink-muted",
             ].join(" ")}
-            onClick={() => setKind(option)}
+            onClick={() => setKind(option.value)}
           >
-            {option}
+            {option.label}
           </button>
         ))}
       </div>
-      <p className="m-0 text-xs text-ink-muted">
-        Audit feed (insert-only fact rows). Revenue sums must use accruals + claims only — graduates,
-        feeRoutings and potFundings carry amounts as audit detail, never add them with accruals.
-      </p>
       {rows.length > 0 ? (
         <ul className="m-0 list-none p-0 font-mono text-xs">
           {rows.slice(0, 8).map((row, index) => (
@@ -281,10 +198,8 @@ function RevenueHistoryCard() {
               <span className="truncate">
                 {row.pool_id ? (
                   <Link className="underline" href={`/tokens/${String(row.pool_id)}`}>
-                    {String(row.pool_id).slice(0, 14)}…
+                    View token
                   </Link>
-                ) : row.recipient ? (
-                  String(row.recipient)
                 ) : (
                   "—"
                 )}
@@ -301,7 +216,7 @@ function RevenueHistoryCard() {
           ))}
         </ul>
       ) : (
-        <p className="m-0 text-sm text-ink-muted">No {kind} rows yet.</p>
+        <p className="m-0 text-sm text-ink-muted">Nothing here yet.</p>
       )}
     </div>
   );

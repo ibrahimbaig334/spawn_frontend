@@ -151,8 +151,8 @@ export function PriceHistoryChart({
           <h2 className="mt-1 mb-0 text-[clamp(1.4rem,3.4vw,2rem)]">Price history</h2>
           <p className="mt-1 mb-0 font-mono text-xs text-ink-muted">
             {latest
-              ? `${formatSubscriptPrice(latest.close.toFixed(18))} ETH · live via stream${
-                  stream?.connected ? " ✓" : " (reconnecting…)"
+              ? `${formatSubscriptPrice(latest.close.toFixed(18))} ETH · live${
+                  stream?.connected ? "" : " (reconnecting…)"
                 }`
               : "No trades yet"}
             {scaled.length > 1

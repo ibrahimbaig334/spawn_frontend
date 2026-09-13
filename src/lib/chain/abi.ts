@@ -263,15 +263,32 @@ export const revenueNftAbi = [
   },
 ] as const;
 
-/** Uniswap v4 Universal Router (V4_SWAP command family). */
-export const universalRouterAbi = [
+/**
+ * SpawnSwapRouter: minimal exact-input router deployed per chain
+ * (`swapRouter` in deployments/<chainId>.json). Wraps pool unlock + settle +
+ * take in one call with a slippage guard; output goes straight to recipient.
+ */
+export const swapRouterAbi = [
   {
     type: "function",
-    name: "execute",
+    name: "swapExactIn",
     stateMutability: "payable",
     inputs: [
-      { name: "commands", type: "bytes" },
-      { name: "inputs", type: "bytes[]" },
+      {
+        name: "key",
+        type: "tuple",
+        components: [
+          { name: "currency0", type: "address" },
+          { name: "currency1", type: "address" },
+          { name: "fee", type: "uint24" },
+          { name: "tickSpacing", type: "int24" },
+          { name: "hooks", type: "address" },
+        ],
+      },
+      { name: "zeroForOne", type: "bool" },
+      { name: "amountIn", type: "uint128" },
+      { name: "amountOutMinimum", type: "uint128" },
+      { name: "recipient", type: "address" },
     ],
     outputs: [],
   },

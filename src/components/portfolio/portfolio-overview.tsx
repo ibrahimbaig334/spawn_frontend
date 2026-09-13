@@ -152,8 +152,8 @@ export function PortfolioOverview() {
       <section className={SECTION}>
         <header className={SECTION_HEADER}>
           <div>
-            <p className={EYEBROW}>Revenue streams</p>
-            <h2>RevenueNFTs you hold</h2>
+            <p className={EYEBROW}>Your earnings passes</p>
+            <h2>Earnings passes you hold</h2>
           </div>
           <span>{streams.data?.length ?? 0}</span>
         </header>
@@ -165,11 +165,10 @@ export function PortfolioOverview() {
                 disabled={claimAll.busy || wallet.chainId !== wallet.targetChainId}
                 onClick={() => void claimAll.claimAll()}
               >
-                {claimAll.busy ? "Claiming…" : "Claim all streams (batched)"}
+                {claimAll.busy ? "Claiming…" : "Claim everything"}
               </Button>
               <span className="font-mono text-xs text-ink-muted">
-                Multicall3 aggregate3 — per-pool claimCreator + claimCreatorPath (self-flushes);
-                zero amounts are no-op successes.
+                Claims from every token in one go.
               </span>
             </div>
             {claimAll.status ? (
@@ -194,9 +193,9 @@ export function PortfolioOverview() {
           </>
         ) : (
           <div className={EMPTY}>
-            <h3>No revenue streams held.</h3>
+            <h3>No earnings passes held.</h3>
             <p>
-              Launch a token or receive a RevenueNFT — claimable ledgers live on the token page.
+              Launch a token or receive an earnings pass — claimable earnings live on the token page.
             </p>
           </div>
         )}

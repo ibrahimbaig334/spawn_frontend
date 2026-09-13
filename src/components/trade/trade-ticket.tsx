@@ -276,9 +276,8 @@ export function TradeTicket({ tokenRef, token, symbol, status, farLevel }: Trade
       </SelectField>
 
       {graduationNext ? (
-        <StatusMessage tone="warning" title="Graduation on next trade">
-          The curve is full ({status}): this trade will trigger graduation into the
-          permanent market. The quote above already accounts for it.
+        <StatusMessage tone="warning" title="This trade graduates the token">
+          This buy moves the token into its permanent market. The quote already includes it.
         </StatusMessage>
       ) : null}
 
@@ -355,8 +354,7 @@ export function TradeTicket({ tokenRef, token, symbol, status, farLevel }: Trade
       )}
 
       <p className="m-0 font-mono text-[0.68rem] leading-4 text-ink-muted">
-        The 1% fee is protocol-owned — not a tip to LPs. Buys pay it in ETH, sells in {symbol}.
-        Quotes run the real hook simulation; re-quote after errors instead of raising slippage.
+        Includes the 1% trading fee. If a trade fails, wait a moment and try again.
       </p>
 
       <Dialog
@@ -399,8 +397,8 @@ export function TradeTicket({ tokenRef, token, symbol, status, farLevel }: Trade
           </dl>
           {graduationNext ? (
             <p className="m-0 rounded-sm border-2 border-protocol bg-raised p-2 text-xs font-bold text-ink">
-              This trade graduates the pool: the curve burns and the permanent market
-              (full-range + wall) is seeded. Proceed only if you want graduation now.
+              This trade graduates the token into its permanent market. Only confirm if you want
+              that now.
             </p>
           ) : null}
           <div className="flex justify-end gap-2">

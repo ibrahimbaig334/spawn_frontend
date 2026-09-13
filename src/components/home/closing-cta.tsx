@@ -17,9 +17,8 @@ export function ClosingCta() {
         {PRODUCT_COPY.closingTitle}
       </h2>
       <p className="mt-5 mb-0 max-w-2xl text-lg">
-        Inspect every term before you trade. Spawns execute directly against the
-        protocol contracts on Base from your own wallet — quotes run the real
-        hook simulation first.
+        Inspect every term before you trade. Every launch runs on the same public
+        rules, and every trade shows its exact price before you confirm.
       </p>
       <div className="mt-8 flex flex-wrap items-center gap-5 max-[38rem]:items-stretch max-[38rem]:flex-col max-[38rem]:[&_a]:w-full">
         <Link

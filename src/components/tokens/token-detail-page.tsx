@@ -12,7 +12,6 @@ import { SOCIAL_META, socialLinks } from "@/components/launch/social-icons";
 import { Button, Progress, StatusMessage, StatusRegion } from "@/components/ui";
 import {
   qk,
-  useDepth,
   useMilestones,
   usePrice,
   useToken,
@@ -30,12 +29,11 @@ import {
   flushPool,
   graduatePool,
 } from "@/lib/chain/trades";
-import type { RevenueKind, TradeItem } from "@/lib/api/dto";
+import type { RevenueEvent, RevenueKind, TradeItem } from "@/lib/api/dto";
 import { ApiError } from "@/lib/api/client";
 import { resolveImageUrl } from "@/services/ipfs-client";
 import {
   formatCompactEth,
-  formatLevel,
   formatUsdApproxFromEthWei,
   phaseLabel,
   relativeTime,
@@ -59,20 +57,33 @@ const PANEL_LABEL =
 const BOOKMARK =
   "h-3.5 w-2.5 border-[1.5px] border-current [clip-path:polygon(0_0,100%_0,100%_100%,50%_72%,0_100%)] forced-colors:[clip-path:none]";
 
-const REVENUE_KINDS: { value: RevenueKind; label: string }[] = [
-  { value: "creatorAccruals", label: "Creator" },
-  { value: "protocolAccruals", label: "Protocol" },
-  { value: "creatorPathAccruals", label: "Creator path" },
-  { value: "claims", label: "Claims" },
-  { value: "payoutTips", label: "Tips" },
-  { value: "pluginPayouts", label: "Plugins" },
-  { value: "potFundings", label: "Pot funding" },
-  { value: "potRedemptions", label: "Pot redeem" },
-  { value: "feeCollections", label: "Fees" },
-  { value: "feeRoutings", label: "Fee routing" },
-  { value: "tokenBurns", label: "Burns" },
-  { value: "graduates", label: "Graduates" },
+const REVENUE_KINDS: { value: RevenueKind; label: string; unit: "eth" | "tokens" }[] = [
+  { value: "pluginPayouts", label: "Payouts", unit: "eth" },
+  { value: "claims", label: "Claims", unit: "eth" },
+  { value: "creatorAccruals", label: "Creator earnings", unit: "eth" },
+  { value: "feeCollections", label: "Trading fees", unit: "eth" },
+  { value: "tokenBurns", label: "Burns", unit: "tokens" },
 ];
+
+/** One-line, human-readable money row: amount + when + receipt link. */
+function RevenueRow({ event, unit, symbol }: { event: RevenueEvent; unit: "eth" | "tokens"; symbol: string }) {
+  const raw = event.amount ?? event.quote_fees;
+  const amount =
+    unit === "eth"
+      ? `${truncateDecimals(formatEther(wei(typeof raw === "string" ? raw : null)))} ETH`
+      : `${formatCompactEth(typeof raw === "string" ? raw : "0", 0)} ${symbol}`;
+  return (
+    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border-b border-rule py-2 text-sm">
+      <span className="min-w-0 font-mono text-xs font-bold text-ink">{amount}</span>
+      <span className="flex items-center gap-3 font-mono text-[0.68rem] text-ink-muted">
+        <a className="underline" href={explorerTx(event.transactionHash)} rel="noreferrer" target="_blank">
+          {event.transactionHash.slice(0, 10)}…
+        </a>
+        {relativeTime(event.timestamp)}
+      </span>
+    </li>
+  );
+}
 
 function Stat({ label, value, sub }: { label: string; value: ReactNode; sub?: ReactNode }) {
   return (
@@ -109,17 +120,15 @@ export function useClaimBalances(poolId: string | null) {
     queryFn: async () => {
       const id = poolId as Hex;
       const client = wallet.publicClient;
-      const [creator, creatorPath, pot, carry] = await Promise.all([
+      const [creator, creatorPath, pot] = await Promise.all([
         client.readContract({ address: hook!, abi: milestoneHookAbi, functionName: "creatorClaimable", args: [id] }),
         client.readContract({ address: hook!, abi: milestoneHookAbi, functionName: "creatorPathClaimable", args: [id] }),
         client.readContract({ address: hook!, abi: milestoneHookAbi, functionName: "payoutPot", args: [id] }),
-        client.readContract({ address: hook!, abi: milestoneHookAbi, functionName: "carryBitmap", args: [id] }),
       ]);
       return {
         creator: creator as bigint,
         creatorPath: creatorPath as bigint,
         pot: pot as bigint,
-        carry: carry as bigint,
       };
     },
     refetchInterval: 20_000,
@@ -137,14 +146,14 @@ function TradeTapeRow({ trade }: { trade: TradeItem }) {
       >
         {trade.side}
       </span>
-      <span className="min-w-0 font-mono text-xs">
-        <strong>
-          {trade.side === "BUY"
-            ? `${truncateDecimals(formatEther(wei(trade.ethAmount)))} ETH → ${formatCompactEth(trade.tokenAmount, 0)} tk`
-            : `${formatCompactEth(trade.tokenAmount, 0)} tk → ${truncateDecimals(formatEther(wei(trade.ethAmount)))} ETH`}
-        </strong>
-        <span className="block text-ink-muted">
-          {truncateAddress(trade.sender)} · lvl {formatLevel(trade.level)} ·{" "}
+        <span className="min-w-0 font-mono text-xs">
+          <strong>
+            {trade.side === "BUY"
+              ? `${truncateDecimals(formatEther(wei(trade.ethAmount)))} ETH → ${formatCompactEth(trade.tokenAmount, 0)} tk`
+              : `${formatCompactEth(trade.tokenAmount, 0)} tk → ${truncateDecimals(formatEther(wei(trade.ethAmount)))} ETH`}
+          </strong>
+          <span className="block text-ink-muted">
+            {truncateAddress(trade.sender)} ·{" "}
           <a className="underline" href={explorerTx(trade.transactionHash)} rel="noreferrer" target="_blank">
             tx
           </a>
@@ -186,76 +195,6 @@ function LiveStreamTicks({ stream }: { stream: PoolStream }) {
   );
 }
 
-function DepthPanel({ tokenRef }: { tokenRef: string }) {
-  const depth = useDepth(tokenRef);
-  const data = depth.data;
-  if (!data) return null;
-  return (
-    <div className="mt-4 grid gap-3">
-      {data.status === "bonding" ? (
-        <div className="border border-rule bg-raised p-3">
-          <p className="m-0 font-mono text-[0.68rem] font-bold uppercase text-ink-muted">
-            Curve inventory ahead — positions JIT-deploy as buys approach them
-          </p>
-          <ul className="mt-2 m-0 grid list-none gap-1 p-0 font-mono text-xs">
-            {(data.curvePositions ?? []).slice(0, 8).map((position) => (
-              <li key={position.position} className="flex justify-between border-b border-rule py-1">
-                <span>pos {position.position}</span>
-                <span>
-                  lvl {formatLevel(position.startLevel)} → {formatLevel(position.endLevel)}
-                </span>
-                <strong>{formatCompactEth(position.liquidity, 0)} L</strong>
-              </li>
-            ))}
-            {(data.curvePositions ?? []).length === 0 ? (
-              <li className="py-1 text-ink-muted">Curve fully deployed — the next qualifying trade graduates.</li>
-            ) : null}
-          </ul>
-        </div>
-      ) : (
-        <div className="grid gap-3">
-          <div className="border border-rule bg-raised p-3">
-            <p className="m-0 font-mono text-[0.68rem] font-bold uppercase text-ink-muted">
-              Live one-sided sell bands above spot
-            </p>
-            <ul className="mt-2 m-0 grid list-none gap-1 p-0 font-mono text-xs">
-              {(data.bands ?? []).slice(0, 8).map((band) => (
-                <li key={band.index} className="flex justify-between border-b border-rule py-1">
-                  <span>band {band.index}</span>
-                  <span>
-                    lvl {formatLevel(band.levelLower)}–{formatLevel(band.levelUpper)}
-                  </span>
-                  <strong>{formatCompactEth(band.tokenInventory, 0)} tk</strong>
-                </li>
-              ))}
-              {(data.bands ?? []).length === 0 ? <li className="py-1 text-ink-muted">No live bands ahead of spot right now.</li> : null}
-            </ul>
-          </div>
-          <div className="border border-rule bg-raised p-3 font-mono text-xs">
-            <p className="m-0 font-mono text-[0.68rem] font-bold uppercase text-ink-muted">
-              Code-locked graduation positions
-            </p>
-            <p className="mt-2 mb-0">
-              Full-range {data.fullRange?.liquidity ? `${formatCompactEth(data.fullRange.liquidity, 0)} L` : "—"} · ticks{" "}
-              {data.fullRange?.tickLower.toLocaleString()}–{data.fullRange?.tickUpper.toLocaleString()}
-              <span className="block text-ink-muted">
-                ETH-limited ≈$5,100 → ≈$150B MC band; $5,100 is the hard price floor.
-              </span>
-            </p>
-            <p className="mt-2 mb-0">
-              Wall {data.wall?.liquidity ? `${formatCompactEth(data.wall.liquidity, 0)} L` : "—"} · levels{" "}
-              {formatLevel(data.wall?.levelLower)}–{formatLevel(data.wall?.levelUpper)}
-              <span className="block text-ink-muted">
-                Token-only deep backing: a thin layer sells per price move — permanent buy-side support.
-              </span>
-            </p>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function useHookWrite() {
   const wallet = useWallet();
   const { addresses } = useProtocol();
@@ -268,32 +207,30 @@ function useHookWrite() {
     if (!wallet.address || !wallet.walletClient || !addresses) return;
     setBusy(true);
     setError(null);
-    setNote(`${label}: confirm in your wallet…`);
+    setNote("Confirm in your wallet…");
     try {
       const hash = await fn();
-      setNote(`${label}: pending on chain…`);
+      setNote("Waiting for confirmation…");
       const receipt = await wallet.publicClient.waitForTransactionReceipt({
         hash,
         pollingInterval: 1_500,
         timeout: 240_000,
       });
       if (receipt.status === "success") {
-        setNote(`${label} confirmed.`);
+        setNote("Done.");
         void queryClient.invalidateQueries({ queryKey: ["claims", poolId] });
         void queryClient.invalidateQueries({ queryKey: ["tokens", poolId] });
         void queryClient.invalidateQueries({ queryKey: qk.price(poolId) });
       } else {
-        setError(
-          `${label} reverted. Transient settlement locks (launch/graduation/flush races) are safe to retry — nothing is lost.`,
-        );
+        setError("That didn't go through — nothing was lost. Try again.");
         setNote(null);
       }
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Transaction failed.";
       setError(
         /rejected|denied|cancelled/i.test(message)
-          ? `${label}: rejected in your wallet.`
-          : `${label}: ${message}`,
+          ? "You rejected the transaction in your wallet."
+          : message,
       );
       setNote(null);
     } finally {
@@ -321,22 +258,18 @@ function ClaimsPanel({
 
   return (
     <>
-      <dl className="m-0 mt-4 grid grid-cols-4 gap-3 max-[56rem]:grid-cols-2 max-[34rem]:grid-cols-1 [&>div]:border [&>div]:border-rule [&>div]:bg-raised [&>div]:p-3 [&_dt]:text-xs [&_dt]:text-ink-muted [&_dd]:m-0 [&_dd]:font-mono [&_dd]:font-bold">
+      <dl className="m-0 mt-4 grid grid-cols-3 gap-3 max-[56rem]:grid-cols-2 max-[34rem]:grid-cols-1 [&>div]:border [&>div]:border-rule [&>div]:bg-raised [&>div]:p-3 [&_dt]:text-xs [&_dt]:text-ink-muted [&_dd]:m-0 [&_dd]:font-mono [&_dd]:font-bold">
         <div>
-          <dt>Payout pot (unflushed)</dt>
-          <dd>{data ? formatEth(data.pot.toString(), 4) : "—"}</dd>
+          <dt>Ready to pay out</dt>
+          <dd>{data ? `${formatEth(data.pot.toString(), 4)} ETH` : "—"}</dd>
         </div>
         <div>
-          <dt>Direct creator revenue</dt>
-          <dd>{data ? formatEth(data.creator.toString(), 4) : "—"}</dd>
+          <dt>Creator earnings</dt>
+          <dd>{data ? `${formatEth(data.creator.toString(), 4)} ETH` : "—"}</dd>
         </div>
         <div>
-          <dt>Creator-path entitlement</dt>
-          <dd>{data ? formatEth(data.creatorPath.toString(), 4) : "—"}</dd>
-        </div>
-        <div>
-          <dt>Plugin carry</dt>
-          <dd>{data ? (data.carry > 0n ? `bitmap 0x${data.carry.toString(16)}` : "none") : "—"}</dd>
+          <dt>Creator bonus share</dt>
+          <dd>{data ? `${formatEth(data.creatorPath.toString(), 4)} ETH` : "—"}</dd>
         </div>
       </dl>
       <StatusRegion className="mt-4">
@@ -347,6 +280,11 @@ function ClaimsPanel({
           </StatusMessage>
         ) : null}
       </StatusRegion>
+      {!wallet.address ? (
+        <p className="mt-4 mb-0 text-sm text-ink-muted">
+          Connect your wallet to distribute payouts or claim earnings.
+        </p>
+      ) : null}
       <div className="mt-4 flex flex-wrap gap-3">
         <Button
           variant="secondary"
@@ -355,7 +293,7 @@ function ClaimsPanel({
             if (!wallet.address || !addresses) return;
             setNote(null);
             void run(
-              "Flush",
+              "Distribute",
               () =>
                 flushPool({
                   hook: addresses.hook as Address,
@@ -368,17 +306,17 @@ function ClaimsPanel({
             );
           }}
         >
-          Flush pot (keeps 1% tip)
+          Distribute payouts
         </Button>
         <Button
           variant="secondary"
           disabled={!wallet.address || !addresses || busy || !isHolder}
-          title={isHolder ? undefined : "Only the current RevenueNFT holder can claim direct revenue"}
+          title={isHolder ? undefined : "Only the current earnings-pass holder can claim this"}
           onClick={() => {
             if (!wallet.address || !addresses) return;
             setNote(null);
             void run(
-              "Direct claim",
+              "Claim",
               () =>
                 claimCreator({
                   hook: addresses.hook as Address,
@@ -390,7 +328,7 @@ function ClaimsPanel({
             );
           }}
         >
-          Claim direct revenue
+          Claim earnings
         </Button>
         <Button
           variant="secondary"
@@ -399,7 +337,7 @@ function ClaimsPanel({
             if (!wallet.address || !addresses) return;
             setNote(null);
             void run(
-              "Creator-path claim",
+              "Claim",
               () =>
                 claimCreatorPath({
                   hook: addresses.hook as Address,
@@ -411,16 +349,16 @@ function ClaimsPanel({
             );
           }}
         >
-          Claim creator path (self-flushes)
+          Claim creator share
         </Button>
         {graduated ? (
           <Button
             variant="quiet"
             disabled={!wallet.address || !addresses || busy}
-            title="Permissionless; collects accrued full-range swap fees. A zero-accrual call is a silent no-op."
+            title="Collects trading fees earned by this market"
             onClick={() =>
               void run(
-                "Collect fees",
+                "Collect",
                 () =>
                   collectFees({
                     hook: addresses!.hook as Address,
@@ -432,13 +370,13 @@ function ClaimsPanel({
               )
             }
           >
-            Collect accrued swap fees
+            Collect trading fees
           </Button>
         ) : null}
       </div>
       <p className="mt-4 mb-0 text-xs text-ink-muted">
-        Zero-amount claims and empty flushes are successful no-ops. If the recipient rejected the ETH
-        transfer, the entitlement was <em>restored</em>, not lost — fix the recipient and claim again.
+        Claiming asks for a small network fee in your wallet. If there is nothing to claim yet,
+        nothing happens — try again after the next payout.
       </p>
     </>
   );
@@ -477,7 +415,7 @@ export function TokenDetailPage({ tokenRef }: { tokenRef: string }) {
   const stream = usePoolStream(poolId);
   const trades = useTrades(tokenRef, { sort: "newest", limit: 40 }, 10_000);
   const milestones = useMilestones(tokenRef, token.data?.status === "graduated");
-  const [revenueKind, setRevenueKind] = useState<RevenueKind>("creatorAccruals");
+  const [revenueKind, setRevenueKind] = useState<RevenueKind>("pluginPayouts");
   const revenue = useRevenueEvents(tokenRef, revenueKind);
   const watchlist = useWatchlist();
   const wallet = useWallet();
@@ -508,8 +446,8 @@ export function TokenDetailPage({ tokenRef }: { tokenRef: string }) {
         <h1 className="text-4xl font-black text-ink">Pool not found</h1>
         <p className="mt-2 max-w-xl text-ink-muted">
           {code === "TOKEN_NOT_FOUND"
-            ? "No launch matches this reference yet. It may still be settling — launches appear as soon as the indexer binds the Launched event."
-            : (token.error as Error)?.message ?? "This pool is unavailable."}
+            ? "No token matches this link yet. New launches appear here within a minute of going live."
+            : (token.error as Error)?.message ?? "This token is unavailable."}
         </p>
         <div className="mt-6 flex gap-4">
           <Link className="border-2 border-ink bg-ink px-4 py-2 font-bold text-inverse no-underline" href="/tokens">
@@ -562,7 +500,7 @@ export function TokenDetailPage({ tokenRef }: { tokenRef: string }) {
               </a>
               {detail.revenueNftOwner ? (
                 <>
-                  {" "}· revenue NFT held by{" "}
+                  {" "}· earnings pass held by{" "}
                   <Link className="underline" href={`/profiles/${detail.revenueNftOwner}`}>
                     {truncateAddress(detail.revenueNftOwner)}
                   </Link>
@@ -609,8 +547,7 @@ export function TokenDetailPage({ tokenRef }: { tokenRef: string }) {
         <div className="min-w-0">
           {graduationNext ? (
             <p className="mt-6 border-2 border-protocol bg-raised px-4 py-3 text-sm font-bold text-ink">
-              Curve full at level {formatLevel(price.data?.level)} — the next qualifying trade graduates the pool.
-              A deliberate graduation is quoted above the button.
+              Almost graduated — the next buy can move this token into its permanent market.
             </p>
           ) : null}
           <dl className="mt-8 grid grid-cols-4 border-y border-rule max-[56rem]:grid-cols-2 max-[34rem]:grid-cols-1 [&>div+div]:border-l [&>div+div]:border-rule max-[56rem]:[&>div:nth-child(3)]:border-l-0 max-[56rem]:[&>div:nth-child(n+3)]:border-t max-[34rem]:[&>div+div]:border-t max-[34rem]:[&>div+div]:border-l-0">
@@ -637,13 +574,13 @@ export function TokenDetailPage({ tokenRef }: { tokenRef: string }) {
               }
             />
             <Stat
-              label="Level (−tick)"
-              value={formatLevel(price.data?.level ?? detail.openingLevel)}
-              sub={
-                detail.status === "bonding"
-                  ? `graduation at ${formatLevel(detail.farLevel)} · source ${price.data?.source ?? "—"}`
-                  : `graduated at ${formatLevel(detail.graduationLevel)}`
+              label="Creator earnings"
+              value={
+                detail.stats
+                  ? formatUsdApproxFromEthWei(detail.stats.creatorRevenueTotal)
+                  : "—"
               }
+              sub="paid to the creator so far"
             />
             <Stat
               label="Volume (all time)"
@@ -659,15 +596,14 @@ export function TokenDetailPage({ tokenRef }: { tokenRef: string }) {
           {detail.status === "bonding" ? (
             <Progress
               className="mb-8 mt-8"
-              label={`Curve progress — lvl ${formatLevel(detail.openingLevel)} → ${formatLevel(detail.farLevel)}`}
+              label="Progress to graduation"
               value={progress * 100}
               valueLabel={`${(progress * 100).toFixed(2)}%`}
             />
           ) : (
             <p className="mt-8 mb-0 text-xs font-bold text-ink-muted">
-              Graduated at level {formatLevel(detail.graduationLevel)} — permanent market with the
-              milestone ladder live ({detail.milestones.completed} harvested, {detail.milestones.live} bands
-              standing).
+              Graduated — trading continues on the permanent market ({detail.milestones.completed} milestones
+              paid out, {detail.milestones.live} active).
             </p>
           )}
 
@@ -696,29 +632,11 @@ export function TokenDetailPage({ tokenRef }: { tokenRef: string }) {
             )}
           </Section>
 
-          <Section id="market" title="Market structure">
-            <p className="mt-2 mb-0 text-sm text-ink-muted">
-              The hook prices every swap through JIT-deployed protocol liquidity — nobody else can
-              provide liquidity while bonding, and after graduation the protocol positions stay
-              code-locked. The 1% fee is static and protocol-owned.
-            </p>
-            <DepthPanel tokenRef={tokenRef} />
-          </Section>
-
           {detail.status === "graduated" ? (
-            <Section
-              id="ladder"
-              title="Milestone ladder"
-              aside={
-                <span className="font-mono text-xs text-ink-muted">
-                  {milestones.data?.meta.total ?? 0} bands computed
-                </span>
-              }
-            >
+            <Section id="ladder" title="Milestones">
               <p className="mt-2 mb-4 text-sm text-ink-muted">
-                22 core bands on the decaying schedule (2× first step → 1.2504× floor at 447-level
-                widths), plus up to 30 fee-funded extensions. A crossed band is harvested — 10%
-                service fee, 90% to the payout pot. Bypassed bands are a normal outcome.
+                Milestones pay out as the price climbs. Every payout splits between the chosen
+                plugins and the creator.
               </p>
               <MilestoneSchedule
                 graduationLevel={detail.graduationLevel ?? 0}
@@ -728,11 +646,9 @@ export function TokenDetailPage({ tokenRef }: { tokenRef: string }) {
             </Section>
           ) : null}
 
-          <Section id="payout" title="Payout pot and claims">
+          <Section id="payout" title="Payouts">
             <p className="mt-2 mb-0 text-sm text-ink-muted">
-              Indexed pot: {formatEth(detail.pot.balance, 4)} ETH ({formatEth(detail.pot.fundedTotal, 4)} funded
-              lifetime, {formatEth(detail.pot.serviceFeeTotal, 4)} service fees). Claimable ledgers are read live
-              from the hook:
+              Milestone money lands here first, then flows to plugins and the creator.
             </p>
             <ClaimsPanel
               poolId={detail.poolId}
@@ -740,24 +656,11 @@ export function TokenDetailPage({ tokenRef }: { tokenRef: string }) {
               graduated={detail.status === "graduated"}
               isHolder={isNftHolder}
             />
-            {detail.launchRecord ? (
-              <p className="mt-4 mb-0 font-mono text-[0.68rem] text-ink-muted">
-                Launch record: {detail.launchRecord.state}
-                {detail.launchRecord.transactionHash ? (
-                  <>
-                    {" · "}
-                    <a className="underline" href={explorerTx(detail.launchRecord.transactionHash)} rel="noreferrer" target="_blank">
-                      launch tx
-                    </a>
-                  </>
-                ) : null}
-              </p>
-            ) : null}
           </Section>
 
           <Section
             id="revenue"
-            title="Revenue events"
+            title="Money flow"
             aside={
               <div className="flex flex-wrap gap-1" role="group" aria-label="Revenue event kind">
                 {REVENUE_KINDS.map((kind) => (
@@ -781,46 +684,18 @@ export function TokenDetailPage({ tokenRef }: { tokenRef: string }) {
           >
             {revenue.data && revenue.data.data.length > 0 ? (
               <ul className="m-0 list-none border-t border-rule p-0">
-                {revenue.data.data.map((event, index) => (
-                  <li
+                {(revenue.data.data as RevenueEvent[]).map((event, index) => (
+                  <RevenueRow
                     key={`${event.transactionHash}-${event.logIndex}-${index}`}
-                    className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border-b border-rule py-2 text-sm"
-                  >
-                    <span className="min-w-0 font-mono text-xs text-ink">
-                      {Object.entries(event)
-                        .filter(
-                          ([key]) =>
-                            ![
-                              "transactionHash",
-                              "logIndex",
-                              "blockNumber",
-                              "timestamp",
-                              "ordinalKey",
-                              "chainId",
-                              "poolId",
-                              "id",
-                            ].includes(key),
-                        )
-                        .map(([key, value]) =>
-                          typeof value === "string" || typeof value === "number" || typeof value === "boolean"
-                            ? `${key}=${String(value)}`
-                            : null,
-                        )
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </span>
-                    <span className="flex items-center gap-3 font-mono text-[0.68rem] text-ink-muted">
-                      <a className="underline" href={explorerTx(event.transactionHash)} rel="noreferrer" target="_blank">
-                        {event.transactionHash.slice(0, 10)}…
-                      </a>
-                      {relativeTime(event.timestamp)}
-                    </span>
-                  </li>
+                    event={event}
+                    unit={REVENUE_KINDS.find((kind) => kind.value === revenueKind)?.unit ?? "eth"}
+                    symbol={detail.symbol ?? "tokens"}
+                  />
                 ))}
               </ul>
             ) : (
               <p className="border border-rule bg-raised p-6 text-center text-sm text-ink-muted">
-                No {revenueKind} events for this pool yet.
+                Nothing here yet — payouts, claims, and fees appear as they happen.
               </p>
             )}
           </Section>
@@ -832,7 +707,7 @@ export function TokenDetailPage({ tokenRef }: { tokenRef: string }) {
 
         <aside className="sticky top-4 grid min-w-0 gap-4 max-[72rem]:hidden" aria-label="Trading panel">
           <div className={PANEL}>
-            <p className={PANEL_LABEL}>Uniswap v4 · direct on-chain execution</p>
+            <p className={PANEL_LABEL}>Trade</p>
             <div className="mt-3">
               <TradeTicket
                 tokenRef={tokenRef}
@@ -844,37 +719,19 @@ export function TokenDetailPage({ tokenRef }: { tokenRef: string }) {
             </div>
           </div>
           <div className="border border-rule bg-raised p-4 font-mono text-xs">
-            <p className="m-0 font-mono text-[0.68rem] font-bold uppercase text-ink-muted">Pool facts</p>
+            <p className="m-0 font-mono text-[0.68rem] font-bold uppercase text-ink-muted">Token facts</p>
             <ul className="mt-2 m-0 grid list-none gap-1 p-0">
               <li className="flex justify-between gap-2">
-                <span className="text-ink-muted">poolId</span>
-                <span className="truncate">{detail.poolId.slice(0, 18)}…</span>
-              </li>
-              <li className="flex justify-between gap-2">
-                <span className="text-ink-muted">configHash</span>
-                <span className="truncate">{detail.configHash?.slice(0, 18) ?? "—"}…</span>
-              </li>
-              <li className="flex justify-between gap-2">
-                <span className="text-ink-muted">total supply</span>
+                <span className="text-ink-muted">supply</span>
                 <span>{formatCompactEth(detail.totalSupply, 0)}</span>
               </li>
               <li className="flex justify-between gap-2">
-                <span className="text-ink-muted">burned</span>
-                <span>
-                  {detail.stats ? formatCompactEth(detail.stats.burnedTotal, 0) : "0"}
-                </span>
+                <span className="text-ink-muted">circulating</span>
+                <span>{formatCompactEth(detail.circulatingSupply, 0)}</span>
               </li>
               <li className="flex justify-between gap-2">
-                <span className="text-ink-muted">dev buy share</span>
-                <span>{(Number(wei(detail.devBuyShareWad)) / 1e16).toFixed(2)}%</span>
-              </li>
-              <li className="flex justify-between gap-2">
-                <span className="text-ink-muted">payout plan</span>
-                <span title={detail.payoutPlan}>bits {planBits(detail.payoutPlan)}</span>
-              </li>
-              <li className="flex justify-between gap-2">
-                <span className="text-ink-muted">creator revenue</span>
-                <span>{detail.stats ? formatCompactEth(detail.stats.creatorRevenueTotal) : "—"} ETH</span>
+                <span className="text-ink-muted">creator earnings</span>
+                <span>{detail.stats ? formatUsdApproxFromEthWei(detail.stats.creatorRevenueTotal) : "—"}</span>
               </li>
             </ul>
           </div>
@@ -883,7 +740,7 @@ export function TokenDetailPage({ tokenRef }: { tokenRef: string }) {
 
       <div className="mt-8 hidden max-[72rem]:block">
         <div className={`${PANEL} max-w-[38rem]`}>
-          <p className={PANEL_LABEL}>Uniswap v4 · direct on-chain execution</p>
+          <p className={PANEL_LABEL}>Trade</p>
           <div className="mt-3">
             <TradeTicket
               tokenRef={tokenRef}
@@ -897,18 +754,4 @@ export function TokenDetailPage({ tokenRef }: { tokenRef: string }) {
       </div>
     </main>
   );
-}
-
-function planBits(payoutPlan: string): string {
-  let value = 0n;
-  try {
-    value = BigInt(payoutPlan);
-  } catch {
-    return "—";
-  }
-  const bits: number[] = [];
-  for (let i = 0; i < 64 && value >> BigInt(i) > 0n; i += 1) {
-    if ((value >> BigInt(i)) & 1n) bits.push(i);
-  }
-  return bits.length ? bits.join(",") : "none";
 }

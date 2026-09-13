@@ -1,38 +1,38 @@
 const questions = [
   {
-    question: "Can I provide liquidity to a Spawn pool?",
+    question: "Can I add funds to someone else's token market?",
     answer:
-      "Not while bonding — the hook rejects every third-party deposit and withdrawal; the curve is protocol-owned. After graduation the protocol's full-range and wall positions stay code-locked forever, and third parties may only LP their own separate positions elsewhere.",
+      "Not while it is on its starting curve — only the protocol provides funds there. After graduation the protocol's positions stay locked forever, and you can only fund your own separate position elsewhere.",
   },
   {
-    question: "When exactly does graduation happen?",
+    question: "When exactly does a token graduate?",
     answer:
-      "When the live level reaches the curve top (about 4x the opening valuation, 13,862 levels above opening), evaluated at call time: the next buy auto-graduates, or anyone can call graduate() deliberately. Touching the top and falling back does not graduate the pool.",
+      "When the price climbs to about 4x the opening price, the next buy graduates it automatically — or anyone can graduate it deliberately. Touching the top and falling back does not graduate it.",
   },
   {
     question: "What does a milestone actually pay?",
     answer:
-      "When a swap crosses a band's top, that band's tokens are sold into the pump: 10% service fee to the protocol, 90% funding the payout pot. The pot is flushed to the launch's plugins and the creator's revenue path — anyone can flush it and earn a 1% tip.",
+      "When the price crosses a milestone, that milestone's tokens are sold: a 10% service fee goes to the protocol and 90% funds the payout pot. The pot is then shared out to the token's plugins and its creator — anyone can trigger the share-out and earn a 1% tip.",
   },
   {
-    question: "My launch shows a band was bypassed — is something broken?",
+    question: "My token shows a milestone was skipped — is something broken?",
     answer:
-      "No. If the price outruns a band before it can deploy, the band is skipped and its tokens roll into the next rung. It is a specified outcome, not a failure.",
+      "No. If the price jumps past a milestone before it can pay out, it is skipped and its share rolls into the next one. That is normal, not a failure.",
   },
   {
-    question: "Can a relayer steal or alter my launch?",
+    question: "Can anyone steal or alter my launch?",
     answer:
-      "No. Every configuration field sits inside the EIP-712 digest the protocol's trusted operator signs; any edit changes the digest and the chain reverts. A relayed launch also cannot trigger a dev buy — that only happens on a direct launch from your own wallet.",
+      "No. Every detail of your launch is locked in the moment it goes live — any edit would be rejected. And buying your own tokens at launch only happens through your own wallet.",
   },
   {
     question: "Does reaching a milestone prove lasting demand?",
     answer:
-      "No. Markets can reverse, and a band harvested at its top may be the last. A reached target is not proof of durable value.",
+      "No. Markets can reverse, and a milestone paid out at its top may be the last. A reached target is not proof of lasting value.",
   },
   {
-    question: "Is the protocol deployed?",
+    question: "Is Spawn live on my network?",
     answer:
-      "This interface consumes addresses only from the backend's deployment manifest (GET /protocol/addresses) — never hardcoded. Until a manifest syncs for your chain, browsing works and launches will report PROTOCOL_NOT_DEPLOYED.",
+      "If launches fail, the protocol may not be live on your network yet — browsing and market data keep working regardless.",
   },
 ] as const;
 

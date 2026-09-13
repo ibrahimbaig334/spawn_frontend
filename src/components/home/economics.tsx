@@ -115,24 +115,20 @@ export function Economics() {
               <td>1%</td>
             </tr>
             <tr>
-              <th scope="row">Tick spacing</th>
-              <td>1</td>
+              <th scope="row">Priced in</th>
+              <td>ETH</td>
             </tr>
             <tr>
-              <th scope="row">Quote currency</th>
-              <td>ETH (native)</td>
-            </tr>
-            <tr>
-              <th scope="row">Third-party liquidity</th>
-              <td>Rejected</td>
+              <th scope="row">Outside funding</th>
+              <td>Not accepted</td>
             </tr>
           </tbody>
         </table>
       </div>
       <p className="m-0 border-l-4 border-accent bg-raised p-5 text-ink print:border-black">
-        <strong>No free creator allocation.</strong> A creator may make a dev
-        buy of up to 10% of supply on ordinary buyer terms — tokens delivered
-        fully at launch, no vesting.
+        <strong>No free creator allocation.</strong> A creator can buy up to 10%
+        of supply at launch on the same terms as everyone else — no discounts,
+        no lockups.
       </p>
     </section>
   );

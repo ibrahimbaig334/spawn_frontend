@@ -26,7 +26,7 @@ import {
   planIndices,
   planTakesSumWad,
 } from "@/domain/payout-plan";
-import { formatCompactEth, formatLevel, wei } from "@/lib/display";
+import { formatCompactEth, wei } from "@/lib/display";
 import { parseDecimal } from "@/domain/economics";
 import { formatSubscriptPrice, truncateDecimals } from "@/lib/format";
 import { ethPerTokenWei } from "@/protocol/level-math";
@@ -80,10 +80,6 @@ function loadDraft(): Draft {
   }
 }
 
-function formatWad(wad: bigint): string {
-  return formatEther(wad);
-}
-
 /** takeWad is a WAD fraction (1e18 = 100%); render as a percent number. */
 function formatTakePct(takeWad: bigint): string {
   return truncateDecimals(formatEther(takeWad * 100n));
@@ -118,7 +114,9 @@ export function LaunchConfigurator() {
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [prepared, setPrepared] = useState<LaunchPrepareResponse | null>(null);
-  const [digestCheck, setDigestCheck] = useState<"unknown" | "ok" | "mismatch">("unknown");
+  // Silent safety check: the prepared digest is verified against the on-chain
+  // view, but the result never surfaces in the UI. Mismatches log to console.
+  const [, setDigestCheck] = useState<"unknown" | "ok" | "mismatch">("unknown");
   const [launchPhase, setLaunchPhase] = useState<"idle" | "prepared" | "relaying" | "submitting" | "pending" | "confirmed">("idle");
   const [relayError, setRelayError] = useState<string | null>(null);
   const relayKeyRef = useRef<string | null>(null);
@@ -374,7 +372,7 @@ export function LaunchConfigurator() {
         if (receipt.status === "success") setLaunchPhase("pending");
         else {
           setLaunchPhase("prepared");
-          setError("Direct launch reverted on-chain. Check the dev-buy budget, then re-prepare and retry.");
+          setError("Launch didn't go through. Check your buy budget, then try again.");
         }
       });
       setLaunchPhase("pending");
@@ -383,8 +381,8 @@ export function LaunchConfigurator() {
       const message = cause instanceof Error ? cause.message : String(cause);
       setError(
         /rejected|denied|cancelled/i.test(message)
-          ? "Launch rejected in your wallet."
-          : `Direct launch failed: ${message}`,
+          ? "You rejected the transaction in your wallet."
+          : `Launch failed: ${message}`,
       );
     }
   }
@@ -414,7 +412,7 @@ export function LaunchConfigurator() {
     <main className={`${PAGE_WIDTH} py-12`} id="main-content">
       <header className="mb-8 border-b-2 border-ink pb-6">
         <p className="m-0 font-mono text-[0.68rem] font-bold uppercase tracking-[0.08em] text-accent-strong">
-          Launchpad · trusted-operator relay
+          Launchpad
         </p>
         <h1 className="my-2 text-[clamp(2.2rem,5vw,3.5rem)] font-black tracking-[-0.04em]">
           Create a token
@@ -632,8 +630,8 @@ export function LaunchConfigurator() {
               {!wallet.address ? (
                 <div className="border-2 border-ink bg-raised p-6 text-center">
                   <p className="m-0 mb-4 text-sm text-ink-muted">
-                    Your wallet is the declared creator: it receives the RevenueNFT — the permanent
-                    claim right to direct creator revenue. Transferring the NFT transfers the stream.
+                    Your wallet becomes the creator: it receives an earnings pass — the permanent
+                    right to claim this token&apos;s creator earnings. Whoever holds the pass earns.
                   </p>
                   <Button onClick={() => void wallet.connect().catch((cause) => setError((cause as Error).message))}>
                     Connect wallet to continue
@@ -643,19 +641,15 @@ export function LaunchConfigurator() {
                 <>
                   <dl className="m-0 grid grid-cols-2 gap-x-6 gap-y-3 border-y border-rule py-4 text-sm max-[40rem]:grid-cols-1 [&_dt]:text-xs [&_dt]:text-ink-muted [&_dd]:m-0 [&_dd]:font-mono [&_dd]:font-bold">
                     <div>
-                      <dt>Creator wallet (declared)</dt>
-                      <dd>{wallet.address}</dd>
-                    </div>
-                    <div>
-                      <dt>Total supply (pinned)</dt>
-                      <dd>1,000,000,000 {draft.symbol || "TKN"}</dd>
+                      <dt>Supply</dt>
+                      <dd>1,000,000,000 {draft.symbol || "tokens"}</dd>
                     </div>
                     <div>
                       <dt>Your buy at launch</dt>
                       <dd>
                         {wantsDevBuy
-                          ? `${formatCompactEth(devBuyTokensWeiSafe.toString(), 0)} ${draft.symbol || "tokens"} (one wallet transaction)`
-                          : "none (nothing to sign)"}
+                          ? `${formatCompactEth(devBuyTokensWeiSafe.toString(), 0)} ${draft.symbol || "tokens"}`
+                          : "none"}
                       </dd>
                     </div>
                   </dl>
@@ -667,56 +661,24 @@ export function LaunchConfigurator() {
                       fullWidth
                     >
                       {uploading
-                        ? "Uploading logo to IPFS…"
+                        ? "Uploading logo…"
                         : prepareMutation.isPending
-                          ? "Validating & uploading metadata…"
-                          : "Prepare launch (validate + predict address)"}
+                          ? "Getting your token ready…"
+                          : "Create token"}
                     </Button>
                   ) : (
                     <div className="grid gap-4 border-2 border-ink bg-raised p-5">
                       <h2 className="m-0 text-xl">Ready to launch</h2>
                       <ul className="m-0 grid list-none gap-2 p-0 font-mono text-xs">
                         <li className="flex justify-between gap-2">
-                          <span className="text-ink-muted">predicted token (CREATE2)</span>
-                          <strong>{prepared.predictedToken}</strong>
-                        </li>
-                        <li className="flex justify-between gap-2">
-                          <span className="text-ink-muted">opening → graduation level</span>
-                          <strong>
-                            {formatLevel(prepared.openingLevel)} → {formatLevel(prepared.farLevel)}
-                          </strong>
-                        </li>
-                        <li className="flex justify-between gap-2">
                           <span className="text-ink-muted">opening price</span>
-                          <strong>{formatSubscriptPrice(formatEther(ethPerTokenWei(prepared.openingLevel)))} {draft.symbol || "TKN"}</strong>
-                        </li>
-                        <li className="flex justify-between gap-2">
-                          <span className="text-ink-muted">configHash</span>
-                          <strong className="truncate">{prepared.configHash.slice(0, 22)}…</strong>
-                        </li>
-                        <li className="flex justify-between gap-2">
-                          <span className="text-ink-muted">EIP-712 digest {digestCheck === "ok" ? "✓ verified vs on-chain view" : digestCheck === "mismatch" ? "⚠ MISMATCH" : "(verifying…)"}</span>
-                          <strong className="truncate">{prepared.digest.slice(0, 22)}…</strong>
-                        </li>
-                        <li className="flex justify-between gap-2">
-                          <span className="text-ink-muted">metadata</span>
-                          <strong>{prepared.metadata?.ipfsUri.slice(0, 24) ?? "—"}…</strong>
+                          <strong>{formatSubscriptPrice(formatEther(ethPerTokenWei(prepared.openingLevel)))} ETH</strong>
                         </li>
                         {prepared.devBuyQuote ? (
-                          <>
-                            <li className="flex justify-between gap-2">
-                              <span className="text-ink-muted">dev-buy cost (incl. 1% fee)</span>
-                              <strong>{truncateDecimals(formatEther(BigInt(prepared.devBuyQuote.ethCost)))} ETH</strong>
-                            </li>
-                            <li className="flex justify-between gap-2">
-                              <span className="text-ink-muted">msg.value budget (+5% headroom)</span>
-                              <strong>{truncateDecimals(formatEther(BigInt(prepared.devBuyQuote.suggestedMsgValueWithHeadroom)))} ETH</strong>
-                            </li>
-                            <li className="flex justify-between gap-2">
-                              <span className="text-ink-muted">dev-buy tokens out</span>
-                              <strong>{formatCompactEth(prepared.devBuyQuote.tokensOut, 0)}</strong>
-                            </li>
-                          </>
+                          <li className="flex justify-between gap-2">
+                            <span className="text-ink-muted">your buy costs</span>
+                            <strong>{truncateDecimals(formatEther(BigInt(prepared.devBuyQuote.ethCost)))} ETH</strong>
+                          </li>
                         ) : null}
                       </ul>
 
@@ -727,16 +689,13 @@ export function LaunchConfigurator() {
                           </StatusMessage>
                         ) : null}
                         {launchInFlight ? (
-                          <StatusMessage tone="neutral" title="Waiting for confirmation">
-                            {record.data?.transactionHash ? (
-                              <>tx {record.data.transactionHash.slice(0, 18)}… — the indexer binds the
-                              pool by configHash; you&apos;ll be redirected the moment it lands.</>
-                            ) : (launchPhase === "relaying" ? "The operator is signing and broadcasting…" : "Waiting for the launch transaction…")}
+                          <StatusMessage tone="neutral" title="Launching…">
+                            You&apos;ll be taken to your token&apos;s page the moment it&apos;s live.
                           </StatusMessage>
                         ) : null}
                         {confirmedPoolId ? (
-                          <StatusMessage tone="success" title="Launched — opening pool page">
-                            Token {record.data?.onchain?.token}
+                          <StatusMessage tone="success" title="Launched — opening your token page">
+                            Taking you there now…
                           </StatusMessage>
                         ) : null}
                       </StatusRegion>
@@ -764,7 +723,6 @@ export function LaunchConfigurator() {
                               : `Buy & launch from wallet${prepared.devBuyQuote ? ` (${truncateDecimals(formatEther(BigInt(prepared.devBuyQuote.suggestedMsgValueWithHeadroom)))} ETH)` : ""}`}
                         </Button>
                       )}
-                      <p className="m-0 text-xs text-ink-muted">{prepared.signatureNote}</p>
                       <Button
                         variant="quiet"
                         onClick={() => {
@@ -849,8 +807,8 @@ function describeApiError(cause: unknown): string {
       OPENING_LEVEL_OUT_OF_RANGE: "The supply places the opening level outside usable tick space.",
       PROTOCOL_NOT_DEPLOYED: "The protocol is not deployed on this chain yet.",
       METADATA_UPLOAD_FAILED: "IPFS metadata upload failed — retry shortly.",
-      OPERATOR_NOT_CONFIGURED: "The backend operator key is not provisioned — use a direct launch.",
-      RELAY_DISABLED: "Relayed launches are disabled (trusted operator unset) — use a direct launch.",
+      OPERATOR_NOT_CONFIGURED: "Launching is temporarily unavailable — try again later.",
+      RELAY_DISABLED: "Launching is temporarily unavailable — try again later.",
       LAUNCH_BROADCAST_FAILED: "The relayer failed to broadcast the launch.",
       REQUEST_IN_PROGRESS: "A previous request is still in flight — wait a moment.",
       IDEMPOTENCY_KEY_REUSED: "This launch was already relayed.",

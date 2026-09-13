@@ -1,15 +1,15 @@
 const steps = [
   {
     title: "Launch on the curve",
-    body: "Every launch is pinned to 1,000,000,000 tokens and opens at a ≈ $5,000 template market cap. The configuration — supply, payout plan, optional dev buy — is immutable the moment it lands, and the CREATE2 token address was knowable before the launch.",
+    body: "Every launch creates 1,000,000,000 tokens opening at a ≈ $5,000 market cap. The supply, payout split, and your optional opening buy are locked in the moment it goes live.",
   },
   {
     title: "Graduate at ~4x",
-    body: "When the level reaches the curve top (13,862 levels above opening), the pool graduates: curve liquidity burns, proceeds split 20% LP seed / 70% creator / 10% protocol, and two code-locked positions take over — an ETH-limited full-range band with a hard floor plus a deep token-only wall.",
+    body: "When the price reaches about 4x the opening price, the token graduates: graduation proceeds split 70% creator / 20% market funds / 10% protocol, and trading continues on the permanent market.",
   },
   {
-    title: "Climb the milestone ladder",
-    body: "22 protocol-owned sell bands on a decaying schedule (2× first step, 1.2504× floor) stand above graduation, extendable by 30 fee-funded bands. Every crossed band is harvested into the payout pot — 10% service fee, 90% to the pot — and flushed to the launch's selected plugins and the creator path.",
+    title: "Climb the milestones",
+    body: "22 milestones stand above graduation, with more unlocking from trading fees. Every milestone hit pays out — 10% service fee, 90% shared between the token's plugins and its creator.",
   },
 ] as const;
 
@@ -31,8 +31,8 @@ export function HowItWorks() {
           Three phases. One pool.
         </h2>
         <p className="mt-1 mb-0 text-ink-muted">
-          A launch is one pool that morphs in place — no factory, no migration.
-          Price climbs in level space; every user-facing number is a level.
+          One market per token, from its first trade to its permanent home — no
+          migrations, no surprises.
         </p>
       </div>
       <ol className="m-0 list-none border-t-2 border-ink pb-[clamp(4rem,8vw,7rem)] p-0">

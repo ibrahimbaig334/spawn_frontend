@@ -112,7 +112,7 @@ export function ProfilePage({ walletAddress }: { walletAddress: string }) {
                 </ul>
               ) : (
                 <p className="border border-rule bg-raised p-6 text-center text-sm text-ink-muted">
-                  No RevenueNFTs currently held.
+                  No earnings passes held.
                 </p>
               )}
               <p className="mt-3 text-xs text-ink-muted">

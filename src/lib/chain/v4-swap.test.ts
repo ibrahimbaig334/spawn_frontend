@@ -6,6 +6,7 @@ import { universalRouterAbi } from "./abi";
 const TOKEN = "0x0000000000000000000000000000000000001234";
 const HOOK = "0x0000000000000000000000000000000000000999";
 const USER = "0x000000000000000000000000000000000000dead";
+const ROUTER = "0x000000000000000000000000000000000000bEEF";
 const ZERO = "0x0000000000000000000000000000000000000000";
 
 const SWAP_PARAMS = [
@@ -68,6 +69,7 @@ describe("v4 swap calldata", () => {
       amountIn,
       amountOutMinimum: minOut,
       recipient: USER,
+      routerAddress: ROUTER,
       payerIsUser: true,
     });
     expect(call.value).toBe(amountIn);
@@ -111,6 +113,7 @@ describe("v4 swap calldata", () => {
       amountIn: 5n * 10n ** 18n,
       amountOutMinimum: 1n,
       recipient: USER,
+      routerAddress: ROUTER,
       payerIsUser: true,
     });
     expect(call.value).toBe(0n);
@@ -141,8 +144,9 @@ describe("v4 swap calldata", () => {
       amountIn: 1n,
       amountOutMinimum: 0n,
       recipient: USER,
+      routerAddress: ROUTER,
       payerIsUser: true,
     });
-    expect(call.to).toMatch(/^0x[0-9a-fA-F]{40}$/);
+    expect(call.to).toBe(ROUTER);
   });
 });

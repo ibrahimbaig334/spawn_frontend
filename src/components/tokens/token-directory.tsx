@@ -7,6 +7,7 @@ import { useTokenList } from "@/lib/queries";
 import type { TokenListItem } from "@/lib/api/dto";
 import {
   formatCompactEth,
+  formatUsdApproxFromEthWei,
   phaseLabel,
   relativeTime,
   usdApproxFromEthWei,
@@ -20,14 +21,14 @@ import { WAD } from "@/protocol/constants";
 const PAGE_WIDTH =
   "mx-auto w-full max-w-measure px-[max(1rem,calc((100vw-80rem)/2))]";
 
-const GRADUATION_FDV_WEI = WAD * 8n; // ~4x the 2 ETH opening FDV
+const GRADUATION_MCAP_WEI = WAD * 8n; // ~4x the 2 ETH opening valuation
 
 type SortOption = "newest" | "volume" | "market_cap" | "graduated";
 
 function curveProgressPercent(item: TokenListItem): number {
   if (item.status === "graduated") return 100;
-  const fdv = wei(item.fdvEthWei);
-  return Math.min(100, Math.max(0, Number((fdv * 100n) / GRADUATION_FDV_WEI)));
+  const mcap = wei(item.mcapEthWei);
+  return Math.min(100, Math.max(0, Number((mcap * 100n) / GRADUATION_MCAP_WEI)));
 }
 
 function volumeEth(item: TokenListItem): string {
@@ -79,7 +80,7 @@ function TokenGridCard({ item }: { item: TokenListItem }) {
       <dl className="m-0 grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-xs">
         <div className="flex justify-between">
           <dt className="text-[#e9e7e0]/50">MC</dt>
-          <dd className="m-0 font-bold">{formatCompactEth(item.mcapEthWei)} ETH</dd>
+          <dd className="m-0 font-bold">{formatUsdApproxFromEthWei(item.mcapEthWei)}</dd>
         </div>
         <div className="flex justify-between">
           <dt className="text-[#e9e7e0]/50">Vol</dt>
@@ -88,10 +89,6 @@ function TokenGridCard({ item }: { item: TokenListItem }) {
         <div className="flex justify-between">
           <dt className="text-[#e9e7e0]/50">Swaps</dt>
           <dd className="m-0 font-bold">{item.swapCount}</dd>
-        </div>
-        <div className="flex justify-between">
-          <dt className="text-[#e9e7e0]/50">FDV</dt>
-          <dd className="m-0 font-bold">{formatCompactEth(item.fdvEthWei)} ETH</dd>
         </div>
       </dl>
       <div className="grid gap-1">
@@ -132,7 +129,7 @@ function TokenRow({ item }: { item: TokenListItem }) {
       <span className="font-mono text-sm font-bold">
         {item.priceEth ? `${formatSubscriptPrice(item.priceEth)} ETH` : "—"}
       </span>
-      <span className="row-hide-sm font-mono text-sm">{formatCompactEth(item.mcapEthWei)} ETH</span>
+      <span className="row-hide-sm font-mono text-sm">{formatUsdApproxFromEthWei(item.mcapEthWei)}</span>
       <span className="row-hide-sm font-mono text-sm">{formatCompactEth(volumeEth(item))} ETH</span>
       <span className="font-mono text-xs text-ink-muted">{relativeTime(item.launchTime)}</span>
       <span className="grid content-center gap-1">

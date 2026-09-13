@@ -1,7 +1,7 @@
 const steps = [
   {
     title: "Launch on the curve",
-    body: "Every launch is pinned to 1,000,000,000 tokens and opens at the 2 ETH template FDV. The configuration — supply, payout plan, optional dev buy — is immutable the moment it lands, and the CREATE2 token address was knowable before the launch.",
+    body: "Every launch is pinned to 1,000,000,000 tokens and opens at a ≈ $5,000 template market cap. The configuration — supply, payout plan, optional dev buy — is immutable the moment it lands, and the CREATE2 token address was knowable before the launch.",
   },
   {
     title: "Graduate at ~4x",

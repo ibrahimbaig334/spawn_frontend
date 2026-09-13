@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useFeaturedTokens, useTokenList } from "@/lib/queries";
-import { formatCompactEth, relativeTime } from "@/lib/display";
+import { formatCompactEth, formatUsdApproxFromEthWei, relativeTime } from "@/lib/display";
 import { formatSubscriptPrice } from "@/lib/format";
 import { ApiError } from "@/lib/api/client";
 
@@ -86,8 +86,8 @@ export function FeaturedTokens() {
                 </span>
                 <span className="text-lg font-black">{item.name ?? "Unnamed"}</span>
                 <span className="font-mono text-xs text-[#e9e7e0]/70">
-                  {item.priceEth ? `${formatSubscript(item.priceEth)} ETH` : "—"} · FDV{" "}
-                  {item.fdvEthWei ? `${formatCompactEth(item.fdvEthWei)} ETH` : "—"}
+                  {item.priceEth ? `${formatSubscript(item.priceEth)} ETH` : "—"} · MC{" "}
+                  {item.mcapEthWei ? formatUsdApproxFromEthWei(item.mcapEthWei) : "—"}
                 </span>
               </Link>
             </li>

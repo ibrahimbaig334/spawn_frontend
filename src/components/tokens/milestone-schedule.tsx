@@ -3,7 +3,7 @@
 import type { MilestoneItem } from "@/lib/api/dto";
 import { FIXED_TOTAL_SUPPLY, WAD } from "@/protocol/constants";
 import { fdvEthWei } from "@/protocol/level-math";
-import { formatCompactEth, formatRungMultiple, relativeTime } from "@/lib/display";
+import { formatCompactEth, formatRungMultiple, formatUsdApproxFromEthWei, relativeTime } from "@/lib/display";
 
 const STATE_META: Record<MilestoneItem["state"], { label: string; className: string }> = {
   PENDING: { label: "Pending", className: "text-ink-muted" },
@@ -31,12 +31,12 @@ export function MilestoneSchedule({
       </p>
     );
   }
-  const gradFdv = fdvEthWei(FIXED_TOTAL_SUPPLY, graduationLevel) || 1n;
+  const gradMcap = fdvEthWei(FIXED_TOTAL_SUPPLY, graduationLevel) || 1n;
   return (
     <ol className="m-0 grid list-none gap-1 border-t border-rule p-0" aria-label="Milestone bands">
       {milestones.map((band) => {
-        const targetFdv = fdvEthWei(FIXED_TOTAL_SUPPLY, band.levelUpper);
-        const multiple = Number((targetFdv * WAD) / gradFdv) / 1e18;
+        const targetMcap = fdvEthWei(FIXED_TOTAL_SUPPLY, band.levelUpper);
+        const multiple = Number((targetMcap * WAD) / gradMcap) / 1e18;
         const state = STATE_META[band.state];
         return (
           <li
@@ -48,7 +48,7 @@ export function MilestoneSchedule({
               {band.kind === "CORE" ? `M${band.index + 1}` : `F${band.index - 21}`}
             </strong>
             <span className="min-w-0 text-ink-muted">
-              FDV target {formatCompactEth(targetFdv.toString())} ETH ·{" "}
+              MC target {formatUsdApproxFromEthWei(targetMcap.toString())} ·{" "}
               {formatRungMultiple(multiple)} graduation
               {band.tokenInventory ? ` · inventory ${formatCompactEth(band.tokenInventory, 0)}` : ""}
               {band.deployedAt ? ` · deployed ${relativeTime(band.deployedAt)}` : ""}

@@ -11,7 +11,7 @@ export const PRODUCT_COPY = {
 
 export const UI_GLOSSARY = {
   level: "Level (−tick) — the protocol's price coordinate",
-  fdv: "Total supply × 1.0001^level",
+  marketCap: "Circulating supply × 1.0001^level, shown in dollars",
   payoutPot: "Net milestone proceeds awaiting a flush",
   flush: "Permissionless pot delivery; the flusher earns a 1% tip",
   creatorPath: "The creator's mandatory remainder of every pot",

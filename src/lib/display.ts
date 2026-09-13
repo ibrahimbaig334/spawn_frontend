@@ -57,7 +57,10 @@ export function formatCompactEth(
   for (const [divisor, suffix] of units) {
     if (parsed >= divisor) {
       const scaled = (parsed * 10n ** BigInt(precision + 1)) / divisor;
-      const text = formatDecimal(scaled, precision + 1, precision).replace(/\.?0+$/, "");
+      // Strip only fractional trailing zeros: "50" must stay "50", not "5".
+      const text = formatDecimal(scaled, precision + 1, precision)
+        .replace(/(\.\d*?)0+$/, "$1")
+        .replace(/\.$/, "");
       return `${text}${suffix}`;
     }
   }

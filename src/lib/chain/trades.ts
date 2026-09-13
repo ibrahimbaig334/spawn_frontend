@@ -55,6 +55,7 @@ export function buildSwapCall(args: ExecuteSwapArgs): SwapCall {
     amountIn: args.amountIn,
     amountOutMinimum: args.amountOutMinimum,
     recipient: args.account,
+    routerAddress: args.routerAddress,
     payerIsUser: true,
   });
 }

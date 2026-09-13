@@ -109,16 +109,25 @@ export function PriceHistoryChart({
     const span = max - min || max || 1;
     const firstTime = points[0]?.time ?? 0;
     const lastTime = points.at(-1)?.time ?? firstTime;
-    const timeSpan = lastTime - firstTime || 1;
-    return points.map((p) => ({
-      ...p,
-      x: (p.time - firstTime) / timeSpan,
-      y: (max - p.high) / span,
-      height: Math.max((p.high - p.low) / span, 0.004),
-      bodyTop: (max - Math.max(p.open, p.close)) / span,
-      bodyHeight: Math.max((Math.abs(p.close - p.open) / span), 0.004),
-      rising: p.close >= p.open,
-    }));
+    const timeSpan = lastTime - firstTime;
+    const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+    return points.map((p) => {
+      // Time-proportional x with an inset so edge candles are never clipped;
+      // a single instant centers instead of piling at the left edge.
+      const x = timeSpan > 0 ? 0.04 + ((p.time - firstTime) / timeSpan) * 0.92 : 0.5;
+      const wickTop = clamp01((max - p.high) / span);
+      const wickBottom = clamp01((max - p.low) / span);
+      return {
+        ...p,
+        x,
+        y: wickTop,
+        height: Math.max(wickBottom - wickTop, 0.004),
+        bodyTop: clamp01((max - Math.max(p.open, p.close)) / span),
+        bodyHeight: Math.max(Math.abs(p.close - p.open) / span, 0.004),
+        rising: p.close > p.open,
+        flat: p.close === p.open,
+      };
+    });
   }, [points]);
 
   const selected = scaled.find((p) => p.time === selectedTime) ?? null;
@@ -182,6 +191,7 @@ export function PriceHistoryChart({
         >
           {scaled.map((point) => {
             const width = Math.max(60 / scaled.length, 0.35);
+            const color = point.flat ? "#9aa0a6" : point.rising ? "#3ecf6f" : "#e5484d";
             return (
               <g key={point.time}>
                 <line
@@ -189,15 +199,15 @@ export function PriceHistoryChart({
                   x2={point.x * 100}
                   y1={point.y * 100}
                   y2={(point.y + point.height) * 100}
-                  stroke={point.rising ? "#3ecf6f" : "#e5484d"}
+                  stroke={color}
                   strokeWidth="0.25"
                 />
                 <rect
-                  x={point.x * 100 - width / 2}
+                  x={Math.max(point.x * 100 - width / 2, 0)}
                   y={point.bodyTop * 100}
                   width={width}
                   height={point.bodyHeight * 100}
-                  fill={selectedTime === point.time ? "var(--color-focus)" : point.rising ? "#3ecf6f" : "#e5484d"}
+                  fill={selectedTime === point.time ? "var(--color-focus)" : color}
                   onPointerDown={(event: PointerEvent<SVGRectElement>) => {
                     event.preventDefault();
                     setSelectedTime(point.time);

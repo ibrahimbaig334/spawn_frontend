@@ -9,7 +9,7 @@ import { useProtocol } from "@/lib/chain/protocol-context";
 import { executeSwap } from "@/lib/chain/trades";
 import { applySlippBps, formatCompactEth, wei } from "@/lib/display";
 import { formatSubscriptPrice, truncateDecimals } from "@/lib/format";
-import { APP_ENV, explorerTx } from "@/lib/env";
+import { explorerTx, routerAddress } from "@/lib/env";
 import type { TokenStatus } from "@/lib/api/dto";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -90,11 +90,19 @@ export function TradeTicket({ tokenRef, token, symbol, status, farLevel }: Trade
     setTxHash(null);
   }, []);
 
+  const router = routerAddress();
+
   async function submit() {
     const addrs = protocol.addresses;
     if (!wallet.address || !wallet.walletClient || amountInWei === null || !quote.data || !addrs) return;
     if (!addrs.hook) {
       setError("The protocol is not deployed on this chain yet.");
+      return;
+    }
+    if (!router) {
+      setError(
+        `On-chain swaps are unavailable on chain ${wallet.targetChainId}: no swap router is deployed.`,
+      );
       return;
     }
     reset();
@@ -112,7 +120,7 @@ export function TradeTicket({ tokenRef, token, symbol, status, farLevel }: Trade
         walletClient: wallet.walletClient,
         publicClient: wallet.publicClient,
         account: wallet.address,
-        routerAddress: APP_ENV.universalRouterAddress as Address,
+        routerAddress: router,
         multicall3: addrs.multicall3 as Address,
       });
       setPhase("pending");
@@ -275,6 +283,12 @@ export function TradeTicket({ tokenRef, token, symbol, status, farLevel }: Trade
       ) : null}
 
       <StatusRegion>
+        {!router ? (
+          <StatusMessage tone="warning" title="Swaps unavailable on this chain">
+            No swap router is configured for chain {wallet.targetChainId} — quotes above are
+            live, but trading from this UI is disabled until a router is deployed.
+          </StatusMessage>
+        ) : null}
         {insufficient && !busy ? (
           <StatusMessage tone="error" title="Insufficient balance">
             {side === "buy" ? "Your ETH balance is below this amount." : `You hold less than this amount of ${symbol}.`}
@@ -329,7 +343,7 @@ export function TradeTicket({ tokenRef, token, symbol, status, farLevel }: Trade
         <Button
           fullWidth
           variant={side === "buy" ? "primary" : "danger"}
-          disabled={!amountValid || insufficient || busy || !quote.data || !protocol.addresses}
+          disabled={!amountValid || insufficient || busy || !quote.data || !protocol.addresses || !router}
           onClick={() => setConfirming(true)}
         >
           {busy

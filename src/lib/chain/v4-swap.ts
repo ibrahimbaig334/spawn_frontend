@@ -8,7 +8,7 @@ import {
   slice,
 } from "viem";
 import { NATIVE_ETH, POOL_KEY_TUPLE, universalRouterAbi, type PoolKey } from "@/lib/chain/abi";
-import { APP_ENV } from "@/lib/env";
+
 
 /**
  * Uniswap v4 swap calldata for the Universal Router, built directly with viem.
@@ -48,6 +48,8 @@ export interface BuildSwapParams {
   amountOutMinimum: bigint;
   direction: "buy" | "sell";
   recipient: Address;
+  /** Validated Universal Router address (use routerAddress(); never raw env). */
+  routerAddress: Address;
   /** The account spending; for sells the caller must have approved the router. */
   payerIsUser: boolean;
   /** fee (hundredths of a bip) and tickSpacing; default Spawn's 1% / 1. */
@@ -165,7 +167,7 @@ export function buildV4SwapCall(params: BuildSwapParams): SwapCall {
   });
 
   return {
-    to: APP_ENV.universalRouterAddress as Address,
+    to: params.routerAddress,
     data,
     // Buys carry the exact ETH input as value; sells carry none.
     value: zeroForOne ? params.amountIn : 0n,

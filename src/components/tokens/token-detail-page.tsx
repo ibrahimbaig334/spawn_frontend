@@ -36,6 +36,7 @@ import { resolveImageUrl } from "@/services/ipfs-client";
 import {
   formatCompactEth,
   formatLevel,
+  formatUsdApproxFromEthWei,
   phaseLabel,
   relativeTime,
   usdApproxFromEthWei,
@@ -238,7 +239,7 @@ function DepthPanel({ tokenRef }: { tokenRef: string }) {
               Full-range {data.fullRange?.liquidity ? `${formatCompactEth(data.fullRange.liquidity, 0)} L` : "—"} · ticks{" "}
               {data.fullRange?.tickLower.toLocaleString()}–{data.fullRange?.tickUpper.toLocaleString()}
               <span className="block text-ink-muted">
-                ETH-limited ≈$5,100 → ≈$150B FDV band; $5,100 is the hard price floor.
+                ETH-limited ≈$5,100 → ≈$150B MC band; $5,100 is the hard price floor.
               </span>
             </p>
             <p className="mt-2 mb-0">
@@ -625,11 +626,11 @@ export function TokenDetailPage({ tokenRef }: { tokenRef: string }) {
               sub={price.data ? `≈ $${usdApproxFromEthWei(price.data.priceEth).toPrecision(2)}` : undefined}
             />
             <Stat
-              label="FDV"
-              value={price.data ? `${formatCompactEth(price.data.fdvEthWei)} ETH` : "—"}
+              label="MC"
+              value={price.data ? formatUsdApproxFromEthWei(price.data.mcapEthWei) : "—"}
               sub={
                 price.data
-                  ? `MC ${formatCompactEth(price.data.mcapEthWei)} ETH · ATH ${
+                  ? `ATH ${
                       price.data.athPriceEth ? `${formatSubscriptPrice(price.data.athPriceEth)} ETH` : "—"
                     }`
                   : undefined

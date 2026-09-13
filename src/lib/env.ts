@@ -3,6 +3,7 @@
  * reads them directly; defaults match the local backend (API :3000/api/v1,
  * WS broadcaster :3001/ws) and Base mainnet.
  */
+import { getAddress, type Address } from "viem";
 
 function required(name: string, value: string | undefined, fallback: string): string {
   const trimmed = value?.trim();
@@ -28,11 +29,15 @@ export const APP_ENV = {
     process.env.NEXT_PUBLIC_RPC_URL,
     "https://mainnet.base.org",
   ),
-  /** Uniswap v4 Universal Router (canonical deployment; override per chain via env). */
+  /**
+   * Uniswap v4 Universal Router for on-chain swaps. Empty unless explicitly
+   * configured per chain: a mainnet default here would point at an address
+   * with nothing deployed (and a wrong checksum crashes viem outright).
+   */
   universalRouterAddress: required(
     "NEXT_PUBLIC_UNIVERSAL_ROUTER_ADDRESS",
     process.env.NEXT_PUBLIC_UNIVERSAL_ROUTER_ADDRESS,
-    "0x6f3E82184dd8326224222466D586F30226284F69",
+    "",
   ),
   explorerBase: required(
     "NEXT_PUBLIC_EXPLORER_BASE_URL",
@@ -53,4 +58,19 @@ export function explorerTx(hash: string): string {
 
 export function explorerAddress(address: string): string {
   return `${APP_ENV.explorerBase}/address/${address}`;
+}
+
+/**
+ * Checksummed swap-router address, or null when none is configured (or the
+ * configured value is malformed). Callers must gate on-chain swaps on null:
+ * sending to an undeployed/mistyped router is what crashed viem outright.
+ */
+export function routerAddress(): Address | null {
+  const raw = APP_ENV.universalRouterAddress.trim();
+  if (!raw) return null;
+  try {
+    return getAddress(raw);
+  } catch {
+    return null;
+  }
 }

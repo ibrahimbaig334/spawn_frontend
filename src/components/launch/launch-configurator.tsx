@@ -4,9 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Hex } from "viem";
 import { formatEther } from "viem";
-import { Button, CheckboxField, InputField, SelectField, StatusMessage, StatusRegion, TextareaField } from "@/components/ui";
+import { Button, CheckboxField, InputField, StatusMessage, StatusRegion, TextareaField } from "@/components/ui";
 import { useLogoDropzone } from "@/components/launch/token-card";
-import { resolveImageUrl, uploadLogoToIPFS } from "@/services/ipfs-client";
+import { LOGO_TYPES, resolveImageUrl, uploadLogoToIPFS } from "@/services/ipfs-client";
 import { useProtocol } from "@/lib/chain/protocol-context";
 import { useWallet } from "@/lib/chain/wallet";
 import { useLaunchRecord, usePrepareLaunch, useRelayLaunch } from "@/lib/queries";
@@ -27,6 +27,7 @@ import {
   planTakesSumWad,
 } from "@/domain/payout-plan";
 import { formatCompactEth, formatLevel, wei } from "@/lib/display";
+import { parseDecimal } from "@/domain/economics";
 import { formatSubscriptPrice, truncateDecimals } from "@/lib/format";
 import { ethPerTokenWei } from "@/protocol/level-math";
 
@@ -34,7 +35,7 @@ const PAGE_WIDTH =
   "mx-auto w-full max-w-measure px-[max(1rem,calc((100vw-80rem)/2))]";
 const STEPS = ["Identity", "Payout plan", "Dev buy", "Review & launch"] as const;
 
-const DRAFT_KEY = "spawn.launch-draft.v4";
+const DRAFT_KEY = "spawn.launch-draft.v5";
 
 interface Draft {
   name: string;
@@ -46,10 +47,8 @@ interface Draft {
   telegram: string;
   discord: string;
   payoutPlan: string;
-  devBuyEnabled: boolean;
-  devBuyPercent: string;
-  deadlineMinutes: number;
-  mode: "relay" | "direct";
+  /** Whole-token amount the creator buys at launch; "" skips the buy. */
+  devBuyTokens: string;
 }
 
 const INITIAL_DRAFT: Draft = {
@@ -62,10 +61,7 @@ const INITIAL_DRAFT: Draft = {
   telegram: "",
   discord: "",
   payoutPlan: "1",
-  devBuyEnabled: false,
-  devBuyPercent: "5",
-  deadlineMinutes: 60,
-  mode: "relay",
+  devBuyTokens: "",
 };
 
 function loadDraft(): Draft {
@@ -73,7 +69,12 @@ function loadDraft(): Draft {
   try {
     const raw = window.localStorage.getItem(DRAFT_KEY);
     if (!raw) return INITIAL_DRAFT;
-    return { ...INITIAL_DRAFT, ...(JSON.parse(raw) as Partial<Draft>) };
+    const merged = { ...INITIAL_DRAFT, ...(JSON.parse(raw) as Partial<Draft>) };
+    // Object-URL previews don't survive reloads; force a fresh logo pick.
+    if (typeof merged.imageUri === "string" && merged.imageUri.startsWith("blob:")) {
+      merged.imageUri = "";
+    }
+    return merged;
   } catch {
     return INITIAL_DRAFT;
   }
@@ -81,6 +82,27 @@ function loadDraft(): Draft {
 
 function formatWad(wad: bigint): string {
   return formatEther(wad);
+}
+
+/** takeWad is a WAD fraction (1e18 = 100%); render as a percent number. */
+function formatTakePct(takeWad: bigint): string {
+  return truncateDecimals(formatEther(takeWad * 100n));
+}
+
+/** Creator dev-buy cap: 10% of the pinned 1B supply, in whole tokens. */
+const MAX_DEV_BUY_TOKENS = 100_000_000;
+
+/** Parses the dev-buy token amount to token-wei; null = invalid, 0n = skipped. */
+function parseDevBuyTokens(text: string): bigint | null {
+  const trimmed = text.trim().replace(/,/g, "");
+  if (trimmed === "") return 0n;
+  return parseDecimal(trimmed, 18);
+}
+
+/** Human plugin name; registry internals (index, address, bits) stay hidden. */
+function pluginLabel(entry: { plugin: string }, buyback: string | null): string {
+  if (buyback && entry.plugin.toLowerCase() === buyback.toLowerCase()) return "Buyback & burn";
+  return "Payout plugin";
 }
 
 export function LaunchConfigurator() {
@@ -91,6 +113,9 @@ export function LaunchConfigurator() {
   const [draft, setDraft] = useState<Draft>(INITIAL_DRAFT);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  // Logo file staged for upload: pinning happens when the launch is prepared,
+  // not on selection (the draft only ever carries an ipfs:// URI or preview).
+  const [logoFile, setLogoFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [prepared, setPrepared] = useState<LaunchPrepareResponse | null>(null);
   const [digestCheck, setDigestCheck] = useState<"unknown" | "ok" | "mismatch">("unknown");
@@ -105,7 +130,11 @@ export function LaunchConfigurator() {
   const { inputRef, labelProps, dragging } = useLogoDropzone((file) => void handleLogo(file));
 
   useEffect(() => {
-    const id = window.setTimeout(() => setDraft(loadDraft()), 0);
+    // Restore the saved draft only if the user hasn't typed yet: the timer
+    // can otherwise land mid-fill (slow hydration) and wipe fresh input.
+    const id = window.setTimeout(() => {
+      setDraft((current) => (current === INITIAL_DRAFT ? loadDraft() : current));
+    }, 0);
     return () => window.clearTimeout(id);
   }, []);
 
@@ -126,21 +155,19 @@ export function LaunchConfigurator() {
     [],
   );
 
-  async function handleLogo(file: File) {
+  function handleLogo(file: File) {
+    if (!LOGO_TYPES.includes(file.type)) {
+      setUploadError("Logos must be PNG, JPEG, WEBP, or GIF.");
+      return;
+    }
     if (file.size > 4.3 * 1024 * 1024) {
       setUploadError("Logo exceeds the 4.3MB upload limit.");
       return;
     }
-    setUploading(true);
     setUploadError(null);
-    try {
-      const { ipfsUri } = await uploadLogoToIPFS(file);
-      set("imageUri", ipfsUri);
-    } catch (cause) {
-      setUploadError(cause instanceof Error ? cause.message : "Upload failed.");
-    } finally {
-      setUploading(false);
-    }
+    if (draft.imageUri.startsWith("blob:")) URL.revokeObjectURL(draft.imageUri);
+    setLogoFile(file);
+    set("imageUri", URL.createObjectURL(file));
   }
 
   const socials = useMemo(() => {
@@ -156,6 +183,10 @@ export function LaunchConfigurator() {
   const selectablePlugins = protocol.plugins.filter(
     (entry) => entry.role === "PAYOUT" && !entry.suspended,
   );
+  const buybackPlugin = protocol.addresses?.buybackAndBurnPlugin ?? null;
+  const selectedEntries = selectablePlugins.filter((entry) =>
+    hasPlanBit(selectedPlan, entry.registryIndex),
+  );
   const planTakes = planTakesSumWad(
     selectedPlan,
     selectablePlugins.map((entry) => ({ index: entry.registryIndex, takeWad: wei(entry.takeWad) })),
@@ -163,37 +194,81 @@ export function LaunchConfigurator() {
   const planTooWide = planIndices(selectedPlan).length > 8 || planTakes > WAD;
 
   const descriptionWords = draft.description.trim() ? draft.description.trim().split(/\s+/).length : 0;
+  const trimmedName = draft.name.trim();
+  const trimmedSymbol = draft.symbol.trim();
+  // The launch API accepts any non-empty description; the logo is pinned to
+  // IPFS at prepare time, so a staged file (or existing ipfs:// URI) counts.
+  const logoReady = draft.imageUri.startsWith("ipfs://") || logoFile !== null;
   const identityValid =
-    draft.name.trim().length >= 1 &&
-    draft.name.trim().length <= 80 &&
-    /^[A-Z0-9]{1,12}$/.test(draft.symbol.trim()) &&
-    descriptionWords >= 5 &&
-    descriptionWords <= 100;
+    trimmedName.length >= 1 &&
+    trimmedName.length <= 80 &&
+    /^[A-Z0-9]{1,12}$/.test(trimmedSymbol) &&
+    draft.description.trim().length >= 1 &&
+    descriptionWords <= 100 &&
+    logoReady;
+  const nameError =
+    draft.name && (trimmedName.length < 1 || trimmedName.length > 80)
+      ? "Enter a token name (1–80 characters)."
+      : null;
+  const symbolError =
+    draft.symbol && !/^[A-Z0-9]{1,12}$/.test(trimmedSymbol)
+      ? "Use 1–12 characters, A–Z / 0–9."
+      : null;
+  const descriptionError =
+    draft.description.trim() && descriptionWords > 100 ? "Keep it under 100 words." : null;
+  const identityMissing = [
+    trimmedName.length === 0 ? "a token name" : null,
+    !/^[A-Z0-9]{1,12}$/.test(trimmedSymbol) ? "a valid symbol (A–Z / 0–9)" : null,
+    draft.description.trim().length === 0 ? "a description" : null,
+    !logoReady ? "a logo" : null,
+  ].filter((item): item is string => item !== null);
 
-  const devBuyShareWad = draft.devBuyEnabled
-    ? ((BigInt(Math.round(Number(draft.devBuyPercent || "0") * 100)) * WAD) / 10_000n).toString()
+  // Creator buy: a token amount in, WAD share out. Empty = no buy, which also
+  // selects the automatic launch path (no wallet signature needed).
+  const devBuyTokensWei = parseDevBuyTokens(draft.devBuyTokens);
+  const wantsDevBuy = devBuyTokensWei !== null && devBuyTokensWei > 0n;
+  const devBuyTokensWeiSafe = devBuyTokensWei ?? 0n;
+  const devBuyShareWad = wantsDevBuy
+    ? ((devBuyTokensWei * WAD) / FIXED_TOTAL_SUPPLY).toString()
     : "0";
   const devBuyWithinCap =
-    draft.mode === "relay" || !draft.devBuyEnabled || wei(devBuyShareWad) <= MAX_DEV_BUY_SHARE_WAD;
-
-  const deadline = useMemo(
-    () => Math.floor(Date.now() / 1000) + draft.deadlineMinutes * 60,
-    [draft.deadlineMinutes],
-  );
+    devBuyTokensWei !== null &&
+    devBuyTokensWei <= (FIXED_TOTAL_SUPPLY * MAX_DEV_BUY_SHARE_WAD) / WAD;
+  const launchMode = wantsDevBuy ? "direct" : "relay";
 
   async function apiPrepare() {
     if (!wallet.address) throw new Error("Connect a wallet first.");
+    // The staged logo is pinned now — selection only previews locally.
+    let imageUri = draft.imageUri;
+    if (logoFile) {
+      setUploading(true);
+      setUploadError(null);
+      try {
+        const { ipfsUri } = await uploadLogoToIPFS(logoFile);
+        imageUri = ipfsUri;
+        set("imageUri", ipfsUri);
+        setLogoFile(null);
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : "Logo upload failed.";
+        setUploadError(message);
+        throw new Error(message);
+      } finally {
+        setUploading(false);
+      }
+    }
+    if (!imageUri.startsWith("ipfs://")) throw new Error("Select a logo first.");
     return prepareMutation.mutateAsync({
       creatorWalletAddress: wallet.address,
       name: draft.name.trim(),
       symbol: draft.symbol.trim().toUpperCase(),
       description: draft.description.trim(),
-      imageUri: draft.imageUri,
+      imageUri,
       socials: socials as TokenSocials | undefined,
       totalSupply: FIXED_TOTAL_SUPPLY.toString(),
-      devBuyShareWad: draft.mode === "relay" ? "0" : devBuyShareWad,
+      devBuyShareWad,
       payoutPlan: draft.payoutPlan,
-      deadline,
+      // Fixed 24h window, set automatically — never shown in the UI.
+      deadline: Math.floor(Date.now() / 1000) + 24 * 3600,
     });
   }
 
@@ -299,7 +374,7 @@ export function LaunchConfigurator() {
         if (receipt.status === "success") setLaunchPhase("pending");
         else {
           setLaunchPhase("prepared");
-          setError("Direct launch reverted on-chain. Check the dev-buy budget and deadline freshness, then retry.");
+          setError("Direct launch reverted on-chain. Check the dev-buy budget, then re-prepare and retry.");
         }
       });
       setLaunchPhase("pending");
@@ -345,9 +420,9 @@ export function LaunchConfigurator() {
           Create a token
         </h1>
         <p className="m-0 max-w-2xl text-ink-muted">
-          Supply is pinned to <strong>1,000,000,000</strong> tokens, every launch opens at a 2 ETH FDV
-          and graduates at ~4× onto Uniswap v4. You never sign: the protocol operator relays the
-          launch — or send it directly from your wallet to include a dev buy.
+          Supply is pinned to <strong>1,000,000,000</strong> tokens, every launch opens at a
+          ≈ $5,000 market cap and graduates at ~4× onto Uniswap v4. Buying at launch sends one
+          transaction from your wallet — otherwise your token launches without you signing anything.
         </p>
       </header>
 
@@ -390,6 +465,7 @@ export function LaunchConfigurator() {
                 id="launch-name"
                 label="Token name"
                 hint="1–80 characters. Goes on-chain."
+                error={nameError ?? undefined}
                 value={draft.name}
                 onChange={(event) => set("name", event.target.value)}
                 maxLength={80}
@@ -398,6 +474,7 @@ export function LaunchConfigurator() {
                 id="launch-symbol"
                 label="Ticker symbol"
                 hint="1–12 characters, A–Z / 0–9. Goes on-chain."
+                error={symbolError ?? undefined}
                 value={draft.symbol}
                 onChange={(event) => set("symbol", event.target.value.toUpperCase())}
                 maxLength={12}
@@ -405,7 +482,8 @@ export function LaunchConfigurator() {
               <TextareaField
                 id="launch-description"
                 label="Description"
-                hint={`5–100 words (currently ${descriptionWords}). Stored off-chain on IPFS.`}
+                hint={`1–100 words (currently ${descriptionWords}). Stored off-chain on IPFS.`}
+                error={descriptionError ?? undefined}
                 value={draft.description}
                 onChange={(event) => set("description", event.target.value)}
                 rows={4}
@@ -443,14 +521,13 @@ export function LaunchConfigurator() {
                   }}
                 />
                 {uploadError ? <span className="text-xs font-bold text-error">{uploadError}</span> : null}
-                <InputField
-                  id="launch-image-uri"
-                  label="Or paste an ipfs:// URI"
-                  optional
-                  value={draft.imageUri}
-                  onChange={(event) => set("imageUri", event.target.value)}
-                  placeholder="ipfs://bafk…"
-                />
+                <p className="m-0 text-xs text-ink-muted">
+                  {logoFile
+                    ? `Selected: ${logoFile.name} — uploads to IPFS when you prepare the launch.`
+                    : draft.imageUri.startsWith("ipfs://")
+                      ? "Logo pinned to IPFS."
+                      : "A logo is required — it uploads to IPFS when you prepare the launch."}
+                </p>
               </div>
               <fieldset className="grid gap-4 border-0 p-0">
                 <legend className="mb-1 p-0 text-[0.9375rem] font-bold text-ink">Socials (optional, https)</legend>
@@ -465,15 +542,13 @@ export function LaunchConfigurator() {
           {step === 1 ? (
             <div className="grid gap-5">
               <p className="m-0 text-sm text-ink-muted">
-                Harvested pot value is delivered to selected payout plugins in registry order; the
-                creator is the mandatory remainder. An empty plan sends everything to the creator
-                path. Max 8 plugins, takes must total ≤ 100%.
+                When milestones pay out, each plugin below takes its cut first and whatever is
+                left always goes to you, the creator. Select none and 100% flows to you.
               </p>
               {protocol.undeployed || selectablePlugins.length === 0 ? (
                 <p className="border border-rule bg-raised p-4 text-sm text-ink-muted">
-                  The plugin registry mirror is empty until the indexer syncs. The canonical plan
-                  (buyback-and-burn, registry index 0) is preselected and validated against the live
-                  registry at prepare time.
+                  The plugin list is still syncing. The buyback-and-burn plugin is preselected and
+                  validated against the live registry at prepare time.
                 </p>
               ) : (
                 selectablePlugins.map((entry) => (
@@ -481,8 +556,8 @@ export function LaunchConfigurator() {
                     key={entry.registryIndex}
                     id={`plugin-${entry.registryIndex}`}
                     checked={hasPlanBit(selectedPlan, entry.registryIndex)}
-                    label={`Registry #${entry.registryIndex} — ${entry.plugin.slice(0, 10)}…`}
-                    hint={`take ${truncateDecimals(formatWad(wei(entry.takeWad)))}% · gas ${entry.gasLimit.toLocaleString()}`}
+                    label={pluginLabel(entry, buybackPlugin)}
+                    hint={`Takes ${formatTakePct(wei(entry.takeWad))}% of each payout`}
                     onChange={(event) => {
                       const next = event.target.checked
                         ? withPlanBit(selectedPlan, entry.registryIndex)
@@ -493,15 +568,21 @@ export function LaunchConfigurator() {
                 ))
               )}
               <div className="border-2 border-ink bg-raised p-4 font-mono text-sm">
-                <p className="m-0">
-                  Plan bits: <strong>{planIndices(selectedPlan).join(", ") || "none (100% creator path)"}</strong>
-                </p>
-                <p className="m-0 mt-1">
-                  Plugin takes: <strong>{truncateDecimals(formatWad(planTakes))}%</strong> · creator
-                  remainder: <strong>{truncateDecimals(formatWad(WAD - planTakes))}%</strong>
-                </p>
+                <p className="m-0 font-bold uppercase text-ink-muted">Whole split</p>
+                <ul className="mt-2 m-0 grid list-none gap-1 p-0">
+                  {selectedEntries.map((entry) => (
+                    <li key={entry.registryIndex} className="flex justify-between gap-2">
+                      <span>{pluginLabel(entry, buybackPlugin)}</span>
+                      <strong>{formatTakePct(wei(entry.takeWad))}%</strong>
+                    </li>
+                  ))}
+                  <li className="flex justify-between gap-2">
+                    <span>You (creator remainder)</span>
+                    <strong>{formatTakePct(WAD - planTakes)}%</strong>
+                  </li>
+                </ul>
                 {planTooWide ? (
-                  <p className="m-0 mt-1 text-error">Selected plugins exceed 8 entries or 100% takes.</p>
+                  <p className="m-0 mt-1 text-error">Select at most 8 plugins totaling no more than 100%.</p>
                 ) : null}
               </div>
             </div>
@@ -509,63 +590,40 @@ export function LaunchConfigurator() {
 
           {step === 2 ? (
             <div className="grid gap-5">
-              <fieldset className="grid gap-3 border-0 p-0">
-                <legend className="p-0 text-[0.9375rem] font-bold text-ink">Launch mode</legend>
-                <CheckboxField
-                  id="mode-relay"
-                  checked={draft.mode === "relay"}
-                  label="Relayed launch — the protocol operator signs and broadcasts (recommended)"
-                  hint="Relayed launches skip the dev buy: the share stays curve inventory."
-                  onChange={(event) => {
-                    set("mode", event.target.checked ? "relay" : "direct");
-                    if (event.target.checked) set("devBuyEnabled", false);
-                  }}
-                />
-                <CheckboxField
-                  id="mode-direct"
-                  checked={draft.mode === "direct"}
-                  label="Direct launch — your wallet sends launch(config, 0x) with the dev-buy budget"
-                  hint="Required if you want a dev buy. Unused ETH auto-refunds."
-                  onChange={(event) => {
-                    set("mode", event.target.checked ? "direct" : "relay");
-                    if (!event.target.checked) set("devBuyEnabled", false);
-                  }}
-                />
-              </fieldset>
-              <CheckboxField
-                id="devbuy-enabled"
-                checked={draft.devBuyEnabled && draft.mode === "direct"}
-                disabled={draft.mode !== "direct"}
-                label="Dev buy (creator purchases at launch)"
-                hint={`Hard cap 10% of supply (${formatWad(MAX_DEV_BUY_SHARE_WAD)} share).`}
-                onChange={(event) => set("devBuyEnabled", event.target.checked)}
+              <p className="m-0 text-sm text-ink-muted">
+                Optional: buy your own tokens at the opening price. If you buy anything, you
+                send one transaction from your wallet at launch — otherwise the token launches
+                without you signing anything.
+              </p>
+              <InputField
+                id="devbuy-tokens"
+                label={`How many ${draft.symbol || "tokens"} do you want to buy?`}
+                hint={`Max ${MAX_DEV_BUY_TOKENS.toLocaleString("en-US")} (10% of supply). Leave empty to skip.`}
+                optional
+                value={draft.devBuyTokens}
+                onChange={(event) => set("devBuyTokens", event.target.value.replace(/[^0-9.,]/g, ""))}
+                inputMode="decimal"
+                placeholder="0"
+                error={
+                  devBuyTokensWei === null
+                    ? "Enter a token amount (numbers only)."
+                    : !devBuyWithinCap
+                      ? "Exceeds the 10% cap (100,000,000 tokens)."
+                      : undefined
+                }
               />
-              {draft.devBuyEnabled && draft.mode === "direct" ? (
-                <InputField
-                  id="devbuy-percent"
-                  label="Dev buy share (% of supply, ≤ 10)"
-                  value={draft.devBuyPercent}
-                  onChange={(event) => set("devBuyPercent", event.target.value.replace(/[^0-9.]/g, ""))}
-                  inputMode="decimal"
-                  error={
-                    !devBuyWithinCap ? "Dev-buy share exceeds the 10% protocol cap." : undefined
-                  }
-                />
+              {wantsDevBuy && devBuyWithinCap ? (
+                <div className="border-2 border-ink bg-raised p-4 font-mono text-sm">
+                  <p className="m-0">
+                    You buy{" "}
+                    <strong>
+                      {formatCompactEth(devBuyTokensWeiSafe.toString(), 0)} {draft.symbol || "tokens"}
+                    </strong>{" "}
+                    at fresh-curve cost — the exact ETH is quoted at review and unused value is
+                    refunded.
+                  </p>
+                </div>
               ) : null}
-              <div className="border-2 border-ink bg-raised p-4 font-mono text-sm">
-                <p className="m-0">
-                  If enabled you buy{" "}
-                  <strong>
-                    {formatCompactEth(
-                      ((FIXED_TOTAL_SUPPLY * wei(devBuyShareWad)) / WAD).toString(),
-                      0,
-                    )}{" "}
-                    tokens
-                  </strong>{" "}
-                  at fresh-curve cost — the exact ETH is quoted at review and unused value is
-                  refunded by the hook.
-                </p>
-              </div>
             </div>
           ) : null}
 
@@ -593,40 +651,26 @@ export function LaunchConfigurator() {
                       <dd>1,000,000,000 {draft.symbol || "TKN"}</dd>
                     </div>
                     <div>
-                      <dt>Mode</dt>
-                      <dd>{draft.mode === "relay" ? "Relayed by protocol operator" : "Direct from your wallet"}</dd>
-                    </div>
-                    <div>
-                      <dt>Dev buy</dt>
+                      <dt>Your buy at launch</dt>
                       <dd>
-                        {draft.mode === "relay"
-                          ? "skipped (relayed launches never dev-buy)"
-                          : draft.devBuyEnabled
-                            ? `${draft.devBuyPercent}% of supply`
-                            : "none"}
+                        {wantsDevBuy
+                          ? `${formatCompactEth(devBuyTokensWeiSafe.toString(), 0)} ${draft.symbol || "tokens"} (one wallet transaction)`
+                          : "none (nothing to sign)"}
                       </dd>
                     </div>
                   </dl>
-                  <SelectField
-                    id="launch-deadline"
-                    label="Signature deadline window"
-                    hint="Expired configs can be re-prepared — the predicted token address never moves."
-                    value={String(draft.deadlineMinutes)}
-                    onChange={(event) => set("deadlineMinutes", Number(event.target.value))}
-                  >
-                    <option value="30">30 minutes</option>
-                    <option value="60">1 hour</option>
-                    <option value="240">4 hours</option>
-                    <option value="1440">24 hours</option>
-                  </SelectField>
 
                   {!prepared ? (
                     <Button
-                      disabled={prepareMutation.isPending}
+                      disabled={prepareMutation.isPending || uploading}
                       onClick={() => void prepare()}
                       fullWidth
                     >
-                      {prepareMutation.isPending ? "Validating & uploading metadata…" : "Prepare launch (validate + predict address)"}
+                      {uploading
+                        ? "Uploading logo to IPFS…"
+                        : prepareMutation.isPending
+                          ? "Validating & uploading metadata…"
+                          : "Prepare launch (validate + predict address)"}
                     </Button>
                   ) : (
                     <div className="grid gap-4 border-2 border-ink bg-raised p-5">
@@ -697,15 +741,15 @@ export function LaunchConfigurator() {
                         ) : null}
                       </StatusRegion>
 
-                      {draft.mode === "relay" ? (
+                      {launchMode === "relay" ? (
                         <Button
                           disabled={launchInFlight || relayMutation.isPending}
                           onClick={() => void relay()}
                           fullWidth
                         >
                           {launchInFlight
-                            ? "Launch submitted — waiting for the chain…"
-                            : "Relay launch (operator signs, gasless for you)"}
+                            ? "Launching — waiting for the chain…"
+                            : "Launch token"}
                         </Button>
                       ) : (
                         <Button
@@ -717,7 +761,7 @@ export function LaunchConfigurator() {
                             ? "Check your wallet…"
                             : launchPhase === "pending"
                               ? "Launch pending…"
-                              : `Send launch from wallet${prepared.devBuyQuote ? ` (${truncateDecimals(formatEther(BigInt(prepared.devBuyQuote.suggestedMsgValueWithHeadroom)))} ETH budget)` : ""}`}
+                              : `Buy & launch from wallet${prepared.devBuyQuote ? ` (${truncateDecimals(formatEther(BigInt(prepared.devBuyQuote.suggestedMsgValueWithHeadroom)))} ETH)` : ""}`}
                         </Button>
                       )}
                       <p className="m-0 text-xs text-ink-muted">{prepared.signatureNote}</p>
@@ -729,7 +773,7 @@ export function LaunchConfigurator() {
                           setLaunchPhase("idle");
                         }}
                       >
-                        Re-prepare (fresh deadline)
+                        Re-prepare
                       </Button>
                     </div>
                   )}
@@ -738,6 +782,11 @@ export function LaunchConfigurator() {
             </div>
           ) : null}
 
+          {step === 0 && identityMissing.length > 0 ? (
+            <p className="mt-8 mb-0 text-sm text-ink-muted" role="status">
+              To continue, add {identityMissing.join(", ")}.
+            </p>
+          ) : null}
           <div className="mt-8 flex justify-between">
             <Button variant="secondary" disabled={step === 0} onClick={() => setStep((s) => Math.max(0, s - 1))}>
               Back
@@ -772,8 +821,8 @@ export function LaunchConfigurator() {
           <div className="border border-rule bg-raised p-4 font-mono text-xs">
             <p className="m-0 font-bold uppercase text-ink-muted">Economics preview</p>
             <ul className="mt-2 m-0 grid gap-1 p-0">
-              <li className="flex justify-between"><span className="text-ink-muted">opening FDV</span><strong>2 ETH</strong></li>
-              <li className="flex justify-between"><span className="text-ink-muted">graduation</span><strong>~8 ETH FDV (≈4×)</strong></li>
+              <li className="flex justify-between"><span className="text-ink-muted">opening MC</span><strong>≈ $5,000</strong></li>
+              <li className="flex justify-between"><span className="text-ink-muted">graduation</span><strong>≈ $20,000 MC (≈4×)</strong></li>
               <li className="flex justify-between"><span className="text-ink-muted">curve / ladder / wall+LP</span><strong>250M / 100M / 650M</strong></li>
               <li className="flex justify-between"><span className="text-ink-muted">graduation split</span><strong>70% creator / 20% LP / 10% proto</strong></li>
               <li className="flex justify-between"><span className="text-ink-muted">trading fee</span><strong>1% static</strong></li>
@@ -792,7 +841,7 @@ function describeApiError(cause: unknown): string {
       : "";
     const byCode: Record<string, string> = {
       SUPPLY_NOT_FIXED: "Total supply is pinned to 1,000,000,000 — it cannot be changed.",
-      DEV_BUY_ABOVE_CAP: "Dev-buy share exceeds the 10% cap.",
+      DEV_BUY_ABOVE_CAP: "Dev-buy exceeds the 10% cap (100,000,000 tokens).",
       PAYOUT_PLAN_TOO_MANY_PLUGINS: "A plan selects at most 8 payout plugins.",
       PAYOUT_PLAN_ENTRY_SUSPENDED: "A selected plugin is suspended by governance.",
       PAYOUT_PLAN_ENTRY_NOT_SELECTABLE: "A selected registry entry is not a PAYOUT plugin.",

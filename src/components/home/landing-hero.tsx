@@ -54,7 +54,7 @@ export function LandingHero() {
         <dl className="m-0 grid grid-cols-3 border-y border-rule max-[42rem]:grid-cols-1 [&>div]:min-w-0 [&>div]:px-2.5 [&>div]:py-3.5 [&>div+div]:border-l [&>div+div]:border-rule max-[42rem]:[&>div+div]:border-t max-[42rem]:[&>div+div]:border-l-0 [&_dt]:text-xs [&_dt]:text-ink-muted [&_dd]:mt-1 [&_dd]:mb-0 [&_dd]:overflow-wrap-anywhere [&_dd]:font-mono [&_dd]:text-[0.82rem] [&_dd]:font-bold">
           <div>
             <dt>Opening valuation</dt>
-            <dd>2 ETH FDV</dd>
+            <dd>≈ $5,000 MC</dd>
           </div>
           <div>
             <dt>Graduation at</dt>

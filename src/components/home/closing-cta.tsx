@@ -8,7 +8,7 @@ export function ClosingCta() {
       aria-labelledby="closing-title"
     >
       <p className="m-0 font-mono text-xs font-bold tracking-[0.08em] uppercase">
-        Explore the protocol concept
+        Explore the protocol
       </p>
       <h2
         className="m-0 mt-3 max-w-[12ch] text-[clamp(2.6rem,6vw,5.7rem)] leading-[0.94] tracking-[-0.05em]"
@@ -17,21 +17,22 @@ export function ClosingCta() {
         {PRODUCT_COPY.closingTitle}
       </h2>
       <p className="mt-5 mb-0 max-w-2xl text-lg">
-        Inspect every modeled term before trying a browser-local action. Spawn
-        does not connect to a wallet, contract, market feed, or transaction.
+        Inspect every term before you trade. Spawns execute directly against the
+        protocol contracts on Base from your own wallet — quotes run the real
+        hook simulation first.
       </p>
       <div className="mt-8 flex flex-wrap items-center gap-5 max-[38rem]:items-stretch max-[38rem]:flex-col max-[38rem]:[&_a]:w-full">
         <Link
           className="inline-flex min-h-12 items-center justify-center border border-inverse bg-inverse px-4 py-3 font-bold text-ink no-underline hover:bg-paper"
           href="/tokens"
         >
-          Explore demo tokens
+          Explore live markets
         </Link>
         <Link
           className="inline-flex min-h-target items-center font-bold underline underline-offset-4"
           href="/create"
         >
-          Build a demo launch
+          Launch a token
         </Link>
       </div>
     </section>

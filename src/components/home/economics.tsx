@@ -2,17 +2,17 @@ const supply = [
   [
     "25%",
     "Bonding curve",
-    "One pool per launch: 32 just-in-time curve positions spanning a 2x opening span.",
-  ],
-  [
-    "65%",
-    "Milestone ladder",
-    "30 protocol-owned sell bands at 1.2504x rungs, plus up to 30 fee-funded extensions.",
+    "One pool per launch: 32 just-in-time curve positions spanning two market-cap doublings (13,862 levels).",
   ],
   [
     "10%",
-    "Full-range backing",
-    "A code-locked graduation position — nobody can provide or remove liquidity.",
+    "Milestone ladder",
+    "22 protocol-owned sell bands on a decaying schedule (2× first step → 1.2504× floor), plus up to 30 fee-funded extensions.",
+  ],
+  [
+    "65%",
+    "Graduation backing",
+    "~72.77M tokens in an ETH-limited full-range band (~$5,100 floor) plus a ~577.23M token-only wall across 880,000 levels — code-locked forever.",
   ],
 ] as const;
 
@@ -35,8 +35,9 @@ export function Economics() {
           A fixed supply schedule, made legible.
         </h2>
         <p className="mt-1 mb-0 text-[color:color-mix(in_srgb,#e9e7e0_70%,transparent)] print:text-black">
-          Every launch opens at the same 125 ETH fully-diluted valuation. That
-          figure describes a valuation, not an amount raised or guaranteed.
+          Every launch is pinned to 1,000,000,000 tokens opening at a 2 ETH
+          fully-diluted valuation (~$5,000 at a $2,500 reference). That figure
+          describes a valuation, not an amount raised or guaranteed.
         </p>
       </div>
       <dl className="m-0 grid grid-cols-3 border-y border-[color:color-mix(in_srgb,#e9e7e0_35%,transparent)] max-[52rem]:grid-cols-1 print:border-black [&>div]:p-[clamp(1.25rem,3vw,2rem)] [&>div+div]:border-l [&>div+div]:border-[color:color-mix(in_srgb,#e9e7e0_35%,transparent)] max-[52rem]:[&>div+div]:border-t max-[52rem]:[&>div+div]:border-l-0 print:[&>div+div]:border-black">
@@ -57,10 +58,10 @@ export function Economics() {
       <div className="grid grid-cols-3 border-b border-[color:color-mix(in_srgb,#e9e7e0_35%,transparent)] max-[52rem]:grid-cols-1 print:border-black [&>div]:py-7 [&>div]:pr-6 [&>div+div]:border-l [&>div+div]:border-[color:color-mix(in_srgb,#e9e7e0_35%,transparent)] [&>div+div]:pl-6 max-[52rem]:[&>div+div]:border-t max-[52rem]:[&>div+div]:border-l-0 max-[52rem]:[&>div+div]:pl-0 print:[&>div+div]:border-black [&_h3]:my-2 [&_h3]:font-mono [&_h3]:text-[clamp(1.5rem,3vw,2.4rem)] [&_p:last-child]:m-0 [&_p:last-child]:text-sm [&_p:last-child]:text-[color:color-mix(in_srgb,#e9e7e0_70%,transparent)] print:[&_p:last-child]:text-black">
         <div>
           <p className={EYEBROW}>Graduation proceeds</p>
-          <h3>40 / 55 / 5</h3>
+          <h3>20 / 70 / 10</h3>
           <p>
-            40% seeds the code-locked full-range position, 55% accrues to the
-            creator&apos;s direct ledger, and 5% to the global protocol ledger.
+            20% seeds the code-locked full-range position, 70% accrues to the
+            creator&apos;s direct ledger, and 10% to the global protocol ledger.
           </p>
         </div>
         <div>

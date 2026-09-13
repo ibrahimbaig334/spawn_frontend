@@ -1,209 +1,210 @@
 "use client";
 
 import Link from "next/link";
-import { useRef } from "react";
-import { DEMO_DISCLOSURE } from "@/content/product-copy";
-import { selectPortfolioTotals, selectProfileById } from "@/domain/selectors";
-import { formatEth, formatTokenAmount } from "@/lib/format";
-import { useDemo } from "@/state/use-demo";
-import {
-  DISCLOSURE,
-  EMPTY,
-  EYEBROW,
-  HERO,
-  LOADING,
-  PAGE,
-  SECTION,
-  SECTION_HEADER,
-} from "./portfolio-styles";
-
-function polarity(value: string) {
-  return value.startsWith("-")
-    ? "negative"
-    : value === "0"
-      ? "neutral"
-      : "positive";
-}
+import { erc20Abi, type Address } from "viem";
+import { useQuery } from "@tanstack/react-query";
+import { Button, StatusMessage } from "@/components/ui";
+import { useWallet } from "@/lib/chain/wallet";
+import { useProfileTokens, useRevenueStreams, useLaunchRecords } from "@/lib/queries";
+import { usePoolCards } from "@/lib/use-pool-cards";
+import { useWatchlist } from "@/lib/watchlist";
+import { formatCompactEth, wei } from "@/lib/display";
+import { truncateDecimals } from "@/lib/format";
+import { useClaimAllStreams } from "@/lib/chain/use-claim-all";
+import { PAGE, EYEBROW, SECTION, SECTION_HEADER, EMPTY } from "./portfolio-styles";
 
 export function PortfolioOverview() {
-  const { state, reset } = useDemo();
-  const dialogRef = useRef<HTMLDialogElement>(null);
-  if (state.runtime.hydration === "pending")
-    return (
-      <section className={LOADING}>
-        <p>Loading browser-local data</p>
-        <h1>Preparing demo portfolio.</h1>
-      </section>
-    );
-  const totals = selectPortfolioTotals(state);
-  const account = selectProfileById(
-    state,
-    state.data.portfolio.accountProfileId,
+  const wallet = useWallet();
+  const watchlist = useWatchlist();
+  const address = wallet.address;
+
+  const created = useProfileTokens(address);
+  const streams = useRevenueStreams(address);
+
+  const poolIds = Array.from(
+    new Set([
+      ...(created.data?.data.map((t) => t.poolId) ?? []),
+      ...watchlist.poolIds,
+    ]),
   );
+  const cards = usePoolCards(poolIds);
+  const details = cards
+    .map((q, index) => ({ poolId: poolIds[index]!, detail: q.data ?? null }))
+    .filter((entry) => entry.detail)
+    .map((entry) => entry.detail!);
+
+  const tokenBalances = useQuery({
+    queryKey: ["portfolio-balances", address, poolIds.join(",")],
+    enabled: Boolean(address) && details.length > 0,
+    queryFn: async () => {
+      if (!address) return [];
+      const results = await Promise.all(
+        details.map(async (d) => ({
+          poolId: d.poolId,
+          balance:
+            ((await wallet.publicClient.readContract({
+              address: d.token as Address,
+              abi: erc20Abi,
+              functionName: "balanceOf",
+              args: [address],
+            })) as bigint) ?? 0n,
+        })),
+      );
+      return results;
+    },
+    refetchInterval: 20_000,
+  });
+
+  const holdings = details
+    .map((detail) => {
+      const balance =
+        tokenBalances.data?.find((b) => b.poolId === detail.poolId)?.balance ?? 0n;
+      const price = wei(detail.priceEth);
+      const valueWei = (balance * price) / 10n ** 18n;
+      return { detail, balance, valueWei };
+    })
+    .filter((entry) => entry.balance > 0n)
+    .sort((a, b) => (a.valueWei > b.valueWei ? -1 : 1));
+
+  const totalValue = holdings.reduce((sum, entry) => sum + entry.valueWei, 0n);
+  const revenueTotal = (streams.data ?? []).reduce(
+    (sum, stream) => sum + wei(stream.creator_revenue_total) + wei(stream.creator_path_revenue_total),
+    0n,
+  );
+  const launches = useLaunchRecords({ creator: address ?? undefined }, Boolean(address));
+  const claimAll = useClaimAllStreams((streams.data ?? []).map((stream) => stream.pool_id));
+
+  if (!address) {
+    return (
+      <main className={PAGE} id="main-content">
+        <p className={EYEBROW}>Portfolio</p>
+        <h1 className="mt-2 mb-0 text-[clamp(2.5rem,6vw,5rem)] leading-[0.95]">Your positions, streams and launches.</h1>
+        <div className="mt-10 max-w-lg rounded-lg border-2 border-dashed border-rule p-10 text-center">
+          <p className="m-0 text-ink-muted">Connect a wallet to see balances, revenue streams, launches and your watchlist.</p>
+          <div className="mt-4">
+            <Button onClick={() => void wallet.connect().catch(() => undefined)}>Connect wallet</Button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <article className={PAGE}>
-      <header className={HERO}>
+    <main className={PAGE} id="main-content">
+      <p className={EYEBROW}>Portfolio · {truncateAddressShort(address)}</p>
+      <h1 className="mt-2 mb-0 text-[clamp(2.5rem,6vw,5rem)] leading-[0.95]">
+        Your positions, streams and launches.
+      </h1>
+
+      <dl className="mt-10 grid grid-cols-4 gap-3 max-[56rem]:grid-cols-2 max-[34rem]:grid-cols-1 [&>div]:border [&>div]:border-rule [&>div]:bg-raised [&>div]:p-4 [&_dt]:text-xs [&_dt]:text-ink-muted [&_dd]:m-0 [&_dd]:font-mono [&_dd]:text-lg [&_dd]:font-black">
         <div>
-          <p className={EYEBROW}>Browser-local demo account</p>
-          <h1>Portfolio accounting, without the wallet fiction.</h1>
-        </div>
-        <p>
-          Review deterministic positions, average-cost basis, and estimated demo
-          value for {account?.displayName ?? "this local participant"}.
-        </p>
-      </header>
-      <p className={DISCLOSURE}>{DEMO_DISCLOSURE}</p>
-      <dl className="mt-6 grid grid-cols-4 border-y-2 border-ink max-[62rem]:grid-cols-2 max-[42rem]:grid-cols-1 [&>div]:min-w-0 [&>div]:p-4 [&>div+div]:border-l [&>div+div]:border-rule max-[62rem]:[&>div:nth-child(3)]:border-l-0 max-[62rem]:[&>div:nth-child(n+3)]:border-t max-[42rem]:[&>div+div]:border-t max-[42rem]:[&>div+div]:border-l-0 [&_dt]:text-xs [&_dt]:text-ink-muted [&_dd]:mt-2 [&_dd]:mb-0 [&_dd]:overflow-wrap-anywhere [&_dd]:font-mono [&_dd]:text-[clamp(1rem,2vw,1.35rem)] [&_dd]:font-bold [&_dd[data-polarity=positive]]:text-accent-strong [&_dd[data-polarity=negative]]:text-error">
-        <div>
-          <dt>Available demo ETH</dt>
-          <dd>{formatEth(totals.ethBalance, 2)}</dd>
+          <dt>Wallet</dt>
+          <dd>{wallet.ethBalance ? `${truncateDecimals(wallet.ethBalance)} ETH` : "—"}</dd>
         </div>
         <div>
-          <dt>Estimated demo value</dt>
-          <dd>{formatEth(totals.estimatedValueEth, 2)}</dd>
+          <dt>Position value (watched + created pools)</dt>
+          <dd>{formatCompactEth(totalValue.toString(), 4)} ETH</dd>
         </div>
         <div>
-          <dt>Average-cost basis</dt>
-          <dd>{formatEth(totals.costBasisEth, 2)}</dd>
+          <dt>Creator revenue (lifetime, held streams)</dt>
+          <dd>{formatCompactEth(revenueTotal.toString(), 4)} ETH</dd>
         </div>
         <div>
-          <dt>Total demo P&amp;L</dt>
-          <dd data-polarity={polarity(totals.totalPnlEth)}>
-            {formatEth(totals.totalPnlEth, 2)}
-          </dd>
+          <dt>Launches submitted</dt>
+          <dd>{launches.data?.meta.total ?? 0}</dd>
         </div>
       </dl>
-      <section className={SECTION} aria-labelledby="position-title">
+
+      <section className={SECTION}>
         <header className={SECTION_HEADER}>
           <div>
-            <p className={EYEBROW}>Derived from the ledger</p>
-            <h2 id="position-title">Position accounting</h2>
+            <p className={EYEBROW}>Balances</p>
+            <h2>Tokens you hold</h2>
           </div>
-          <Link
-            className="font-mono text-xs font-bold text-ink-muted"
-            href="/portfolio/activity"
-          >
-            View account activity
-          </Link>
+          <span>{holdings.length} positions</span>
         </header>
-        {totals.positions.length ? (
-          <div>
-            {totals.positions.map((position) => (
-              <article
-                className="grid grid-cols-[minmax(12rem,.55fr)_minmax(30rem,1.5fr)] items-center gap-x-8 gap-y-6 border-b border-rule py-5 break-inside-avoid max-[62rem]:grid-cols-1"
-                key={position.launch.poolId}
-              >
-                <div>
-                  <p className="m-0 text-xs text-ink-muted">
-                    ${position.launch.symbol}
-                  </p>
-                  <h3 className="my-1 text-xl">
-                    <Link href={`/tokens/${position.launch.slug}`}>
-                      {position.launch.name}
-                    </Link>
-                  </h3>
-                  <span className="text-xs text-ink-muted">
-                    {position.tokenQuantity === "0"
-                      ? "Closed position"
-                      : "Simulated holding"}
-                  </span>
-                </div>
-                <dl className="m-0 grid grid-cols-3 gap-px bg-rule max-[42rem]:grid-cols-2 max-[28rem]:grid-cols-1 [&>div]:min-w-0 [&>div]:bg-raised [&>div]:px-3 [&>div]:py-2 [&_dt]:text-xs [&_dt]:text-ink-muted [&_dd]:mt-1 [&_dd]:mb-0 [&_dd]:overflow-wrap-anywhere [&_dd]:font-mono [&_dd]:text-xs [&_dd]:font-bold [&_dd[data-polarity=positive]]:text-accent-strong [&_dd[data-polarity=negative]]:text-error">
-                  <div>
-                    <dt>Quantity</dt>
-                    <dd>
-                      {formatTokenAmount(
-                        position.tokenQuantity,
-                        position.launch.symbol,
-                        4,
-                      )}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Average cost</dt>
-                    <dd>{formatEth(position.averageCostEth, 2)}</dd>
-                  </div>
-                  <div>
-                    <dt>Remaining basis</dt>
-                    <dd>{formatEth(position.remainingCostBasisEth, 2)}</dd>
-                  </div>
-                  <div>
-                    <dt>Estimated value</dt>
-                    <dd>{formatEth(position.estimatedValueEth, 2)}</dd>
-                  </div>
-                  <div>
-                    <dt>Realized P&amp;L</dt>
-                    <dd data-polarity={polarity(position.realizedPnlEth)}>
-                      {formatEth(position.realizedPnlEth, 2)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Unrealized P&amp;L</dt>
-                    <dd data-polarity={polarity(position.unrealizedPnlEth)}>
-                      {formatEth(position.unrealizedPnlEth, 2)}
-                    </dd>
-                  </div>
-                </dl>
-              </article>
-            ))}
+        {holdings.length === 0 ? (
+          <div className={EMPTY}>
+            <h3>No positions in watched or created pools.</h3>
+            <p>
+              <Link href="/tokens">Find a market</Link> and trade — balances show here automatically.
+            </p>
           </div>
         ) : (
+          <ul className="m-0 list-none border-b border-rule p-0">
+            {holdings.map(({ detail, balance, valueWei }) => (
+              <li key={detail.poolId} className="grid grid-cols-[minmax(0,2fr)_repeat(2,minmax(0,1fr))_auto] items-center gap-4 border-b border-rule py-3">
+                <Link className="truncate font-bold text-ink no-underline hover:underline" href={`/tokens/${detail.poolId}`}>
+                  {detail.name ?? "Unnamed"} <span className="font-mono text-xs text-ink-muted">${detail.symbol}</span>
+                </Link>
+                <span className="font-mono text-sm">{formatCompactEth(balance.toString(), 0)} {detail.symbol}</span>
+                <span className="font-mono text-sm text-ink-muted">{formatCompactEth(valueWei.toString(), 4)} ETH</span>
+                <span className="font-mono text-[0.68rem] text-ink-muted">{detail.status}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {wallet.chainId !== wallet.targetChainId ? (
+          <StatusMessage tone="warning">Switch your wallet network to read live balances.</StatusMessage>
+        ) : null}
+      </section>
+
+      <section className={SECTION}>
+        <header className={SECTION_HEADER}>
+          <div>
+            <p className={EYEBROW}>Revenue streams</p>
+            <h2>RevenueNFTs you hold</h2>
+          </div>
+          <span>{streams.data?.length ?? 0}</span>
+        </header>
+        {streams.data && streams.data.length > 0 ? (
+          <>
+            <div className="my-4 flex flex-wrap items-center gap-3">
+              <Button
+                variant="secondary"
+                disabled={claimAll.busy || wallet.chainId !== wallet.targetChainId}
+                onClick={() => void claimAll.claimAll()}
+              >
+                {claimAll.busy ? "Claiming…" : "Claim all streams (batched)"}
+              </Button>
+              <span className="font-mono text-xs text-ink-muted">
+                Multicall3 aggregate3 — per-pool claimCreator + claimCreatorPath (self-flushes);
+                zero amounts are no-op successes.
+              </span>
+            </div>
+            {claimAll.status ? (
+              <StatusMessage
+                tone={claimAll.status.tone === "info" ? "neutral" : claimAll.status.tone}
+              >
+                {claimAll.status.message}
+              </StatusMessage>
+            ) : null}
+            <ul className="m-0 mt-2 list-none border-b border-rule p-0">
+            {streams.data.map((stream) => (
+              <li key={stream.pool_id} className="grid grid-cols-[minmax(0,2fr)_repeat(2,minmax(0,1fr))_auto] items-center gap-4 border-b border-rule py-3">
+                <Link className="truncate font-bold text-ink no-underline hover:underline" href={`/tokens/${stream.pool_id}`}>
+                  {stream.name ?? "Unnamed"} <span className="font-mono text-xs text-ink-muted">${stream.symbol}</span>
+                </Link>
+                <span className="font-mono text-sm">{formatCompactEth(stream.creator_revenue_total, 4)} ETH</span>
+                <span className="font-mono text-sm text-ink-muted">+ path {formatCompactEth(stream.creator_path_revenue_total, 4)}</span>
+                <span className="font-mono text-[0.68rem] text-ink-muted">{stream.status}</span>
+              </li>
+            ))}
+            </ul>
+          </>
+        ) : (
           <div className={EMPTY}>
-            <h3>No demo positions yet.</h3>
+            <h3>No revenue streams held.</h3>
             <p>
-              Use a token detail page to record a browser-local buy simulation.
+              Launch a token or receive a RevenueNFT — claimable ledgers live on the token page.
             </p>
-            <Link href="/tokens">Browse demo tokens</Link>
           </div>
         )}
       </section>
-      <section
-        className="mt-[clamp(3rem,8vw,7rem)] flex items-center justify-between gap-8 border-y border-rule py-5 max-[42rem]:items-stretch max-[42rem]:flex-col print:hidden"
-        aria-labelledby="demo-settings"
-      >
-        <div>
-          <p className={EYEBROW}>Local settings</p>
-          <h2 className="my-1" id="demo-settings">
-            Reset this demonstration
-          </h2>
-          <p className="m-0 text-ink-muted">
-            Restore fixed fixtures and remove browser-local launches, comments,
-            trades, and watchlist changes.
-          </p>
-        </div>
-        <button
-          className="min-h-target cursor-pointer border border-error bg-transparent px-4 py-2.5 font-bold text-error"
-          type="button"
-          onClick={() => dialogRef.current?.showModal()}
-        >
-          Reset demo data
-        </button>
-      </section>
-      <dialog
-        className="w-[calc(100%_-_2rem)] max-w-[34rem] border-2 border-ink bg-raised p-6 text-ink backdrop:bg-[rgb(23_26_24/70%)] [&_h2]:m-0 [&_h2]:text-2xl [&_p]:text-ink-muted"
-        ref={dialogRef}
-        aria-labelledby="reset-title"
-      >
-        <h2 id="reset-title">Reset all browser-local demo data?</h2>
-        <p>
-          This restores the fixed fixture dataset. Local launches, trades,
-          comments, and watchlist changes cannot be recovered.
-        </p>
-        <div className="flex justify-end gap-2 max-[42rem]:flex-col-reverse [&_button]:min-h-target [&_button]:cursor-pointer [&_button]:border [&_button]:border-ink [&_button]:bg-transparent [&_button]:px-3 [&_button]:py-2 [&_button]:font-bold [&_button:last-child]:border-error [&_button:last-child]:bg-error [&_button:last-child]:text-inverse">
-          <button type="button" onClick={() => dialogRef.current?.close()}>
-            Keep current data
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              reset();
-              dialogRef.current?.close();
-            }}
-          >
-            Reset demo data
-          </button>
-        </div>
-      </dialog>
-    </article>
+    </main>
   );
+}
+
+function truncateAddressShort(address: string): string {
+  return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }

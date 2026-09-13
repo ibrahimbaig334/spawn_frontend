@@ -2,12 +2,12 @@ const questions = [
   {
     question: "Can I provide liquidity to a Spawn pool?",
     answer:
-      "No. The hook rejects every third-party deposit and withdrawal — the pool's liquidity (curve, then full-range plus ladder) is protocol-owned by design. Trading is the only pool interaction.",
+      "Not while bonding — the hook rejects every third-party deposit and withdrawal; the curve is protocol-owned. After graduation the protocol's full-range and wall positions stay code-locked forever, and third parties may only LP their own separate positions elsewhere.",
   },
   {
     question: "When exactly does graduation happen?",
     answer:
-      "When the live level reaches the curve top (2x the opening valuation), evaluated at call time: the next buy auto-graduates, or anyone can call graduate() deliberately. Touching the top and falling back does not graduate the pool.",
+      "When the live level reaches the curve top (about 4x the opening valuation, 13,862 levels above opening), evaluated at call time: the next buy auto-graduates, or anyone can call graduate() deliberately. Touching the top and falling back does not graduate the pool.",
   },
   {
     question: "What does a milestone actually pay?",
@@ -22,7 +22,7 @@ const questions = [
   {
     question: "Can a relayer steal or alter my launch?",
     answer:
-      "No. The signature covers every configuration field; any edit changes the digest and the protocol reverts with CreatorMismatch. A relayer also cannot trigger a dev buy on your behalf — relayed launches simply skip it.",
+      "No. Every configuration field sits inside the EIP-712 digest the protocol's trusted operator signs; any edit changes the digest and the chain reverts. A relayed launch also cannot trigger a dev buy — that only happens on a direct launch from your own wallet.",
   },
   {
     question: "Does reaching a milestone prove lasting demand?",
@@ -32,7 +32,7 @@ const questions = [
   {
     question: "Is the protocol deployed?",
     answer:
-      "Deployments exist on testnet; addresses come only from the deployment manifest for the chain you are on. This interface runs a local protocol simulation — no wallet, asset, or transaction is connected.",
+      "This interface consumes addresses only from the backend's deployment manifest (GET /protocol/addresses) — never hardcoded. Until a manifest syncs for your chain, browsing works and launches will report PROTOCOL_NOT_DEPLOYED.",
   },
 ] as const;
 

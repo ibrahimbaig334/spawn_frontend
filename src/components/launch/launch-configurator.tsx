@@ -1,890 +1,815 @@
 "use client";
 
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import type { Hex } from "viem";
+import { formatEther } from "viem";
+import { Button, CheckboxField, InputField, SelectField, StatusMessage, StatusRegion, TextareaField } from "@/components/ui";
+import { useLogoDropzone } from "@/components/launch/token-card";
+import { uploadLogoToIPFS } from "@/services/ipfs-client";
+import { useProtocol } from "@/lib/chain/protocol-context";
+import { useWallet } from "@/lib/chain/wallet";
+import { useLaunchRecord, usePrepareLaunch, useRelayLaunch } from "@/lib/queries";
+import { newIdempotencyKey, ApiError } from "@/lib/api/client";
+import { launchSupportAbi, milestoneHookAbi } from "@/lib/chain/abi";
+import { computeLaunchDigest } from "@/lib/chain/launch-signature";
+import type { LaunchPrepareResponse, TokenSocials } from "@/lib/api/dto";
 import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ChangeEvent,
-} from "react";
+  FIXED_TOTAL_SUPPLY,
+  MAX_DEV_BUY_SHARE_WAD,
+  WAD,
+} from "@/protocol/constants";
 import {
-  draftToConfig,
-  draftToMetadata,
   hasPlanBit,
-  INITIAL_DRAFT,
-  planSummary,
-  validateDraft,
-  withPlanBit,
   withoutPlanBit,
-  type LaunchDraft,
-  type LaunchDraftErrors,
-} from "@/domain/launch-draft";
-import {
-  clearLaunchDraft,
-  loadLaunchDraft,
-  saveLaunchDraft,
-} from "@/lib/launch-draft-storage";
-import { useDemo } from "@/state/use-demo";
-import { formatEth } from "@/lib/format";
-import { parseDecimal } from "@/domain/economics";
-import { RichDescriptionField } from "./rich-description-field";
-import {
-  TokenCard,
-  useLogoDropzone,
-  type TokenCardData,
-  type TokenCardStats,
-} from "./token-card";
-import {
-  LOGO_TYPES,
-  LOGO_TYPE_LABEL,
-  uploadLogoToIPFS,
-} from "@/services/ipfs-client";
-import { SOCIAL_META } from "./social-icons";
+  withPlanBit,
+  planIndices,
+  planTakesSumWad,
+} from "@/domain/payout-plan";
+import { formatCompactEth, formatLevel, wei } from "@/lib/display";
+import { formatSubscriptPrice, truncateDecimals } from "@/lib/format";
+import { ethPerTokenWei } from "@/protocol/level-math";
 
-const STEPS = ["Identity", "Payout plan", "Dev buy", "Review"] as const;
-const FIELD =
-  "grid min-w-0 gap-1.5 [&>span:first-child]:text-sm [&>span:first-child]:font-bold [&_input]:min-h-target [&_input]:w-full [&_input]:min-w-0 [&_input]:border [&_input]:border-rule [&_input]:bg-raised [&_input]:px-3 [&_input]:py-2.5 [&_input]:text-ink [&_input[aria-invalid=true]]:border-2 [&_input[aria-invalid=true]]:border-error [&_select]:min-h-target [&_select]:w-full [&_select]:border [&_select]:border-rule [&_select]:bg-raised [&_select]:px-3 [&_select]:py-2.5";
-const ERROR = "m-0 text-sm font-bold text-error";
-const INTRO = "mt-0 mb-6 text-ink-muted";
+const PAGE_WIDTH =
+  "mx-auto w-full max-w-measure px-[max(1rem,calc((100vw-80rem)/2))]";
+const STEPS = ["Identity", "Payout plan", "Dev buy", "Review & launch"] as const;
 
-const LOCAL_CREATOR = "0x000000000000000000000000000000000000000d" as const;
+const DRAFT_KEY = "spawn.launch-draft.v4";
 
-/** Mock USD price of ETH for preview stats only (no market feed pre-chain). */
-const PREVIEW_ETH_USD = 3000;
-
-/**
- * Live preview stats derived from the draft supply at the protocol's 125 ETH
- * opening FDV: price in USD subscript notation, MC, and flat new-token stats.
- */
-function previewStats(totalSupply: string): TokenCardStats {
-  const supply = parseDecimal(totalSupply);
-  if (supply === null || supply <= 0n) {
-    return {
-      price: "0",
-      marketCapUsd: "0",
-      changePercent: 0,
-      volumeUsd: "0",
-      bondingPercent: 0,
-      comments: 0,
-    };
-  }
-  const priceEth = 125 / Number(supply) * 1e18; // ETH per token at opening FDV
-  const priceUsd = priceEth * PREVIEW_ETH_USD;
-  return {
-    price: String(priceUsd),
-    marketCapUsd: String(125 * PREVIEW_ETH_USD),
-    changePercent: 0,
-    volumeUsd: "0",
-    bondingPercent: 0,
-    comments: 0,
-  };
+interface Draft {
+  name: string;
+  symbol: string;
+  description: string;
+  imageUri: string;
+  website: string;
+  x: string;
+  telegram: string;
+  discord: string;
+  payoutPlan: string;
+  devBuyEnabled: boolean;
+  devBuyPercent: string;
+  deadlineMinutes: number;
+  mode: "relay" | "direct";
 }
 
-function restoredDraft(): LaunchDraft {
+const INITIAL_DRAFT: Draft = {
+  name: "",
+  symbol: "",
+  description: "",
+  imageUri: "",
+  website: "",
+  x: "",
+  telegram: "",
+  discord: "",
+  payoutPlan: "1",
+  devBuyEnabled: false,
+  devBuyPercent: "5",
+  deadlineMinutes: 60,
+  mode: "relay",
+};
+
+function loadDraft(): Draft {
   if (typeof window === "undefined") return INITIAL_DRAFT;
-  return loadLaunchDraft() ?? INITIAL_DRAFT;
+  try {
+    const raw = window.localStorage.getItem(DRAFT_KEY);
+    if (!raw) return INITIAL_DRAFT;
+    return { ...INITIAL_DRAFT, ...(JSON.parse(raw) as Partial<Draft>) };
+  } catch {
+    return INITIAL_DRAFT;
+  }
+}
+
+function formatWad(wad: bigint): string {
+  return formatEther(wad);
 }
 
 export function LaunchConfigurator() {
-  const { state, dispatch, client } = useDemo();
   const router = useRouter();
-  const [draft, setDraft] = useState<LaunchDraft>(restoredDraft);
+  const wallet = useWallet();
+  const protocol = useProtocol();
   const [step, setStep] = useState(0);
-  const [errors, setErrors] = useState<LaunchDraftErrors>({});
-  const [registry, setRegistry] = useState<
-    Awaited<ReturnType<typeof client.listPluginEntries>>
-  >([]);
-  const [predictedToken, setPredictedToken] = useState<string | null>(null);
-  const [status, setStatus] = useState(() =>
-    typeof window !== "undefined" && loadLaunchDraft()
-      ? "Saved local draft restored. Review every value before continuing."
-      : "",
-  );
-  const [saving, setSaving] = useState(false);
-  const [draftReady] = useState(() => typeof window !== "undefined");
-  const panelRef = useRef<HTMLDivElement>(null);
-  const errorSummaryRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    void client.listPluginEntries().then(setRegistry).catch(() => undefined);
-  }, [client]);
-
-  useEffect(() => {
-    if (!draftReady) return;
-    const timeout = window.setTimeout(() => {
-      saveLaunchDraft(draft);
-    }, 250);
-    return () => window.clearTimeout(timeout);
-  }, [draft, draftReady]);
-
-  const summary = useMemo(
-    () => planSummary(draft, registry),
-    [draft, registry],
-  );
-
-  useEffect(() => {
-    if (step !== 0 && step !== 3) return;
-    const config = draftToConfig(draft, LOCAL_CREATOR);
-    const timeout = window.setTimeout(() => {
-      void client
-        .predictTokenAddress(config)
-        .then((address) => setPredictedToken(address))
-        .catch(() => setPredictedToken(null));
-    }, 200);
-    return () => window.clearTimeout(timeout);
-  }, [step, draft, client]);
-
-  const setField = <K extends keyof LaunchDraft>(
-    key: K,
-    value: LaunchDraft[K],
-  ) => {
-    setDraft((current) => ({ ...current, [key]: value }));
-    setErrors((current) => ({ ...current, [key]: undefined }));
-    setStatus("");
-  };
-
-  function togglePlugin(index: number) {
-    const plan = BigInt(draft.payoutPlan);
-    const next = hasPlanBit(plan, index)
-      ? withoutPlanBit(plan, index)
-      : withPlanBit(plan, index);
-    setField("payoutPlan", next.toString());
-  }
-
-  function stepErrors(): LaunchDraftErrors {
-    const all = validateDraft(draft, registry);
-    if (step === 0)
-      return {
-        name: all.name,
-        symbol: all.symbol,
-        totalSupply: all.totalSupply,
-        description: all.description,
-        socials: all.socials,
-      };
-    if (step === 1) return { payoutPlan: all.payoutPlan };
-    if (step === 2) return { devBuyPercent: all.devBuyPercent };
-    return { ...all, deadlineMinutes: all.deadlineMinutes };
-  }
-
-  function continueStep() {
-    const nextErrors = Object.fromEntries(
-      Object.entries(stepErrors()).filter(([, value]) => value),
-    ) as LaunchDraftErrors;
-    setErrors(nextErrors);
-    if (Object.keys(nextErrors).length) {
-      window.requestAnimationFrame(() => errorSummaryRef.current?.focus());
-      return;
-    }
-    setStep((current) => Math.min(3, current + 1));
-    window.requestAnimationFrame(() => panelRef.current?.focus());
-  }
-
-  async function createLaunch() {
-    const finalErrors = validateDraft(draft, registry);
-    setErrors(finalErrors);
-    if (Object.keys(finalErrors).length || saving) {
-      window.requestAnimationFrame(() => errorSummaryRef.current?.focus());
-      return;
-    }
-    setSaving(true);
-    setStatus("");
-    try {
-      const config = draftToConfig(draft, LOCAL_CREATOR);
-      const metadata = draftToMetadata(draft);
-      const result = await client.createLaunch(
-        config,
-        state.data.sequence + 1,
-        metadata,
-      );
-      dispatch({ type: "add-launch", result });
-      clearLaunchDraft();
-      router.push(`/tokens/${result.launch.slug}`);
-    } catch (reason) {
-      setStatus(
-        reason instanceof Error
-          ? reason.message
-          : "The launch could not be created.",
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const activeErrors = Object.entries(errors).filter(
-    (entry): entry is [string, string] => Boolean(entry[1]),
-  );
-
-  return (
-    <section
-      id="launch"
-      className="border-b border-rule px-[max(1rem,calc((100vw-80rem)/2))] py-[clamp(3rem,7vw,7rem)] print:px-0"
-      aria-labelledby="configure-title"
-    >
-      <header className="grid grid-cols-[minmax(0,1fr)_minmax(16rem,.4fr)] items-end gap-8 max-[47.5rem]:grid-cols-1">
-        <div>
-          <p className="m-0 font-mono text-xs font-bold tracking-[0.08em] uppercase">
-            Create · Local simulation
-          </p>
-          <h1
-            className="mt-2 mb-0 max-w-[13ch] text-[clamp(2.2rem,5.5vw,5rem)] leading-[0.98] tracking-[-0.045em]"
-            id="configure-title"
-          >
-            Choose the plan once. Make it public.
-          </h1>
-        </div>
-        <p className="m-0 text-ink-muted">
-          Build the signed launch configuration: identity, payout plan, and an
-          optional dev buy. Runs the protocol simulation in this browser; no
-          wallet or transaction is involved yet.
-        </p>
-      </header>
-      <div className="mt-10 grid grid-cols-[minmax(12rem,.32fr)_minmax(0,1fr)] gap-[clamp(1.5rem,4vw,4rem)] border-t-2 border-ink pt-6 max-[47.5rem]:grid-cols-1">
-        <ol
-          className="m-0 list-none p-0 max-[47.5rem]:grid max-[47.5rem]:grid-cols-4"
-          aria-label="Launch creation steps"
-        >
-          {STEPS.map((label, index) => (
-            <li
-              className="grid grid-cols-[2rem_1fr] gap-2 border-b border-rule py-3 text-ink-muted before:font-mono before:text-xs before:font-bold before:content-[attr(data-number)] data-[active=true]:border-ink data-[active=true]:font-bold data-[active=true]:text-ink max-[47.5rem]:grid-cols-1 max-[47.5rem]:pr-1 max-[47.5rem]:text-xs max-[32.5rem]:[&_span]:sr-only"
-              key={label}
-              data-number={`0${index + 1}`}
-              data-active={step === index}
-              aria-current={step === index ? "step" : undefined}
-            >
-              <span>{label}</span>
-            </li>
-          ))}
-        </ol>
-        <form
-          className="min-w-0"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (step < 3) continueStep();
-            else void createLaunch();
-          }}
-          noValidate
-        >
-          <div
-            className="min-h-[25rem] max-[47.5rem]:min-h-0 [&>h3]:mt-0 [&>h3]:mb-2 [&>h3]:text-[clamp(1.7rem,3.5vw,2.7rem)]"
-            ref={panelRef}
-            tabIndex={-1}
-          >
-            {activeErrors.length ? (
-              <div
-                className="mb-5 border-2 border-error bg-raised p-4"
-                ref={errorSummaryRef}
-                role="alert"
-                tabIndex={-1}
-              >
-                <h3 className="mb-2! text-base!">
-                  Review{" "}
-                  {activeErrors.length === 1 ? "this issue" : "these issues"}
-                </h3>
-                <ul className="m-0 pl-5">
-                  {activeErrors.map(([key, message]) => (
-                    <li key={key}>
-                      <button
-                        className="cursor-pointer border-0 bg-transparent py-1 text-left text-error underline underline-offset-3"
-                        type="button"
-                        onClick={() => {
-                          const stepIndex =
-                            key === "name" ||
-                            key === "symbol" ||
-                            key === "totalSupply" ||
-                            key === "description" ||
-                            key === "socials"
-                              ? 0
-                              : key === "payoutPlan"
-                                ? 1
-                                : key === "devBuyPercent"
-                                  ? 2
-                                  : 3;
-                          setStep(stepIndex);
-                          window.requestAnimationFrame(() =>
-                            panelRef.current
-                              ?.querySelector<HTMLElement>(
-                                "[aria-invalid='true']",
-                              )
-                              ?.focus(),
-                          );
-                        }}
-                      >
-                        {key}: {message}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-            <p className="m-0 font-mono text-xs font-bold tracking-[0.08em] uppercase">
-              Step {step + 1} of 4 · {STEPS[step]}
-            </p>
-            {step === 0 && (
-              <IdentityStep
-                draft={draft}
-                errors={errors}
-                predictedToken={predictedToken}
-                setField={setField}
-              />
-            )}
-            {step === 1 && (
-              <PlanStep
-                draft={draft}
-                registry={registry}
-                summary={summary}
-                error={errors.payoutPlan}
-                onToggle={togglePlugin}
-              />
-            )}
-            {step === 2 && (
-              <DevBuyStep
-                draft={draft}
-                summary={summary}
-                error={errors.devBuyPercent}
-                setField={setField}
-              />
-            )}
-            {step === 3 && (
-              <ReviewStep
-                draft={draft}
-                registry={registry}
-                summary={summary}
-                predictedToken={predictedToken}
-              />
-            )}
-          </div>
-          {status && (
-            <p
-              className="mt-5 grid border-l-[3px] border-accent bg-raised px-4 py-3 text-sm text-ink-muted"
-              role="status"
-            >
-              <strong className="text-ink">Status</strong>
-              {status}
-            </p>
-          )}
-          <p className="mt-4 mb-0 text-xs text-ink-muted">
-            The payout plan is immutable after launch and part of the signed
-            configuration. Drafts are stored locally in this browser.
-          </p>
-          <div className="mt-6 flex justify-end gap-3 border-t border-rule pt-5 max-[34rem]:flex-col-reverse [&_button]:min-h-target [&_button]:cursor-pointer [&_button]:border [&_button]:border-ink [&_button]:px-4 [&_button]:py-2.5 [&_button]:font-bold [&_button]:disabled:cursor-not-allowed [&_button]:disabled:opacity-50 [&_button:last-child]:bg-ink [&_button:last-child]:text-inverse">
-            {step > 0 && (
-              <button
-                className="bg-transparent text-ink"
-                type="button"
-                onClick={() => {
-                  setErrors({});
-                  setStep((current) => current - 1);
-                }}
-              >
-                Back
-              </button>
-            )}
-            <button type="submit" disabled={saving}>
-              {step === 3
-                ? saving
-                  ? "Launching…"
-                  : "Launch (simulation)"
-                : "Continue"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </section>
-  );
-}
-
-interface IdentityProps {
-  draft: LaunchDraft;
-  errors: LaunchDraftErrors;
-  predictedToken: string | null;
-  setField: <K extends keyof LaunchDraft>(
-    key: K,
-    value: LaunchDraft[K],
-  ) => void;
-}
-
-function IdentityStep({
-  draft,
-  errors,
-  predictedToken,
-  setField,
-}: IdentityProps) {
+  const [draft, setDraft] = useState<Draft>(INITIAL_DRAFT);
   const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState("");
-  const dropzone = useLogoDropzone((file) => void handleFile(file));
-  const inputRef = dropzone.inputRef;
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [prepared, setPrepared] = useState<LaunchPrepareResponse | null>(null);
+  const [digestCheck, setDigestCheck] = useState<"unknown" | "ok" | "mismatch">("unknown");
+  const [launchPhase, setLaunchPhase] = useState<"idle" | "prepared" | "relaying" | "submitting" | "pending" | "confirmed">("idle");
+  const [relayError, setRelayError] = useState<string | null>(null);
+  const relayKeyRef = useRef<string | null>(null);
+  const prepareMutation = usePrepareLaunch();
+  const relayMutation = useRelayLaunch();
 
-  async function handleFile(file: File) {
-    setUploadError("");
+  const [launchId, setLaunchId] = useState<string | null>(null);
+  const record = useLaunchRecord(launchId, launchPhase === "relaying" || launchPhase === "pending");
+  const { inputRef, labelProps, dragging } = useLogoDropzone((file) => void handleLogo(file));
+
+  useEffect(() => {
+    const id = window.setTimeout(() => setDraft(loadDraft()), 0);
+    return () => window.clearTimeout(id);
+  }, []);
+
+  useEffect(() => {
+    const id = setTimeout(() => {
+      try {
+        window.localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+      } catch {
+        /* ignore */
+      }
+    }, 250);
+    return () => clearTimeout(id);
+  }, [draft]);
+
+  const set = useCallback(
+    <K extends keyof Draft>(key: K, value: Draft[K]) =>
+      setDraft((current) => ({ ...current, [key]: value })),
+    [],
+  );
+
+  async function handleLogo(file: File) {
+    if (file.size > 4.3 * 1024 * 1024) {
+      setUploadError("Logo exceeds the 4.3MB upload limit.");
+      return;
+    }
     setUploading(true);
+    setUploadError(null);
     try {
       const { url } = await uploadLogoToIPFS(file);
-      setField("logoUrl", url);
-    } catch (reason) {
-      setUploadError(
-        reason instanceof Error
-          ? reason.message
-          : "The logo could not be uploaded.",
-      );
+      set("imageUri", url);
+    } catch (cause) {
+      setUploadError(cause instanceof Error ? cause.message : "Upload failed.");
     } finally {
       setUploading(false);
     }
   }
 
-  function onPick(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (file) void handleFile(file);
-    event.target.value = "";
-  }
+  const socials = useMemo(() => {
+    const value: Record<string, string> = {};
+    if (draft.website.trim()) value.website = draft.website.trim();
+    if (draft.x.trim()) value.x = draft.x.trim();
+    if (draft.telegram.trim()) value.telegram = draft.telegram.trim();
+    if (draft.discord.trim()) value.discord = draft.discord.trim();
+    return Object.keys(value).length ? value : undefined;
+  }, [draft]);
 
-  function removeLogo() {
-    setField("logoUrl", undefined);
-  }
-
-  const cardData: TokenCardData = {
-    name: draft.name,
-    symbol: draft.symbol,
-    description: draft.description,
-    logoUrl: draft.logoUrl,
-    contractAddress: predictedToken ?? "",
-    stats: previewStats(draft.totalSupply),
-    createdLabel: "just now",
-  };
-
-  return (
-    <>
-      <h3>General</h3>
-      <p className={INTRO}>
-        Everything on the card updates live as you type. The configuration is
-        signed in full — a relayer cannot alter a single field of what you
-        enter here.
-      </p>
-      <div className="grid grid-cols-[minmax(18rem,.9fr)_minmax(15rem,22rem)] items-start gap-[clamp(2rem,5vw,5rem)] max-[56rem]:grid-cols-1">
-        {/* Left column — General form */}
-        <div className="grid content-start gap-5">
-          <label className={FIELD}>
-            <span>
-              Name <span className="text-error">*</span>
-            </span>
-            <input
-              value={draft.name}
-              maxLength={40}
-              placeholder="Name your token..."
-              aria-invalid={Boolean(errors.name)}
-              onChange={(event) => setField("name", event.target.value)}
-            />
-            {errors.name && <span className={ERROR}>{errors.name}</span>}
-          </label>
-          <label className={FIELD}>
-            <span>
-              Symbol <span className="text-error">*</span>
-            </span>
-            <input
-              value={draft.symbol}
-              maxLength={8}
-              placeholder="EXAMPLE - BTC, SOL, DOGE..."
-              aria-invalid={Boolean(errors.symbol)}
-              onChange={(event) =>
-                setField("symbol", event.target.value.toUpperCase())
-              }
-            />
-            {errors.symbol && <span className={ERROR}>{errors.symbol}</span>}
-          </label>
-          <RichDescriptionField
-            invalid={Boolean(errors.description)}
-            value={draft.description}
-            onChange={(next) => setField("description", next)}
-          />
-          {errors.description && (
-            <p className={`${ERROR} -mt-3`} role="alert">
-              {errors.description}
-            </p>
-          )}
-          <label className={FIELD}>
-            <span>Total supply</span>
-            <input
-              inputMode="decimal"
-              value={draft.totalSupply}
-              aria-invalid={Boolean(errors.totalSupply)}
-              onChange={(event) => setField("totalSupply", event.target.value)}
-            />
-            {errors.totalSupply && (
-              <span className={ERROR}>{errors.totalSupply}</span>
-            )}
-            <span className="text-xs text-ink-muted">
-              Fixed at launch. Supply split: 25% curve · 65% milestone ladder ·
-              10% full-range backing. Opens at the 125 ETH template FDV.
-            </span>
-          </label>
-
-          {/* Socials */}
-          <fieldset className="m-0 grid gap-4 border-0 p-0">
-            <legend className="px-0 pb-1 text-sm font-bold">
-              Socials{" "}
-              <span className="font-normal text-ink-muted">
-                (optional — shown on the token page)
-              </span>
-            </legend>
-            <div className="grid grid-cols-2 gap-4 max-[34rem]:grid-cols-1">
-              {(
-                Object.keys(SOCIAL_META) as Array<keyof typeof SOCIAL_META>
-              ).map((key) => {
-                const meta = SOCIAL_META[key];
-                const Icon = meta.icon;
-                return (
-                  <label className={FIELD} key={key}>
-                    <span className="flex items-center gap-1.5">
-                      <Icon className="text-ink-muted" height={14} width={14} />
-                      {meta.label}
-                    </span>
-                    <input
-                      inputMode="url"
-                      placeholder={meta.placeholder}
-                      value={draft.socials[key]}
-                      aria-invalid={Boolean(errors.socials)}
-                      onChange={(event) =>
-                        setField("socials", {
-                          ...draft.socials,
-                          [key]: event.target.value,
-                        })
-                      }
-                    />
-                  </label>
-                );
-              })}
-            </div>
-            {errors.socials && (
-              <p className={`${ERROR} -mt-2`} role="alert">
-                {errors.socials}
-              </p>
-            )}
-          </fieldset>
-        </div>
-
-        {/* Right column — Token card preview */}
-        <div className="grid justify-items-center gap-3">
-          <p className="m-0 font-mono text-xs font-bold tracking-[0.08em] text-ink-muted uppercase">
-            Token card preview
-          </p>
-          <TokenCard data={cardData} className="w-full" />
-          <div className="grid w-full max-w-[22rem] gap-2">
-            <label
-              className="grid cursor-pointer justify-items-center gap-1.5 border-2 border-dashed border-rule bg-raised px-4 py-4 text-center hover:border-ink data-[dragging=true]:border-accent data-[dragging=true]:bg-surface-strong"
-              {...dropzone.labelProps}
-            >
-              <input
-                accept={LOGO_TYPES.join(",")}
-                className="sr-only"
-                onChange={onPick}
-                ref={inputRef}
-                type="file"
-              />
-              {uploading ? (
-                <span className="text-sm font-bold text-accent-strong">
-                  Uploading to IPFS…
-                </span>
-              ) : draft.logoUrl ? (
-                <span className="grid gap-1 text-sm font-bold">
-                  Logo uploaded ✓
-                  <span className="font-mono text-xs font-normal break-all text-ink-muted">
-                    {draft.logoUrl}
-                  </span>
-                </span>
-              ) : (
-                <span className="grid gap-1">
-                  <strong className="text-sm">Upload Logo</strong>
-                  <span className="text-xs text-ink-muted">
-                    {LOGO_TYPE_LABEL}
-                  </span>
-                </span>
-              )}
-            </label>
-            <div className="flex items-center justify-between gap-2 text-xs">
-              <span className="text-ink-muted">
-                Stored on IPFS via thirdweb; the URL is passed to the launch.
-              </span>
-              {draft.logoUrl ? (
-                <button
-                  className="cursor-pointer border-0 bg-transparent p-0 font-bold text-error underline underline-offset-3"
-                  type="button"
-                  onClick={removeLogo}
-                >
-                  Remove
-                </button>
-              ) : null}
-            </div>
-            {uploadError && (
-              <p className="m-0 text-sm font-bold text-error" role="alert">
-                {uploadError}
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
-    </>
+  const selectedPlan = BigInt(draft.payoutPlan || "0");
+  const selectablePlugins = protocol.plugins.filter(
+    (entry) => entry.role === "PAYOUT" && !entry.suspended,
   );
-}
+  const planTakes = planTakesSumWad(
+    selectedPlan,
+    selectablePlugins.map((entry) => ({ index: entry.registryIndex, takeWad: wei(entry.takeWad) })),
+  );
+  const planTooWide = planIndices(selectedPlan).length > 8 || planTakes > WAD;
 
-interface PlanProps {
-  draft: LaunchDraft;
-  registry: Awaited<
-    ReturnType<
-      ReturnType<typeof useDemo>["client"]["listPluginEntries"]
-    >
-  >;
-  summary: ReturnType<typeof planSummary>;
-  error?: string;
-  onToggle: (index: number) => void;
-}
+  const descriptionWords = draft.description.trim() ? draft.description.trim().split(/\s+/).length : 0;
+  const identityValid =
+    draft.name.trim().length >= 1 &&
+    draft.name.trim().length <= 80 &&
+    /^[A-Z0-9]{1,12}$/.test(draft.symbol.trim()) &&
+    descriptionWords >= 5 &&
+    descriptionWords <= 100;
 
-function PlanStep({ draft, registry, summary, error, onToggle }: PlanProps) {
+  const devBuyShareWad = draft.devBuyEnabled
+    ? ((BigInt(Math.round(Number(draft.devBuyPercent || "0") * 100)) * WAD) / 10_000n).toString()
+    : "0";
+  const devBuyWithinCap =
+    draft.mode === "relay" || !draft.devBuyEnabled || wei(devBuyShareWad) <= MAX_DEV_BUY_SHARE_WAD;
+
+  const deadline = useMemo(
+    () => Math.floor(Date.now() / 1000) + draft.deadlineMinutes * 60,
+    [draft.deadlineMinutes],
+  );
+
+  async function apiPrepare() {
+    if (!wallet.address) throw new Error("Connect a wallet first.");
+    return prepareMutation.mutateAsync({
+      creatorWalletAddress: wallet.address,
+      name: draft.name.trim(),
+      symbol: draft.symbol.trim().toUpperCase(),
+      description: draft.description.trim(),
+      imageUri: draft.imageUri,
+      socials: socials as TokenSocials | undefined,
+      totalSupply: FIXED_TOTAL_SUPPLY.toString(),
+      devBuyShareWad: draft.mode === "relay" ? "0" : devBuyShareWad,
+      payoutPlan: draft.payoutPlan,
+      deadline,
+    });
+  }
+
+  async function prepare() {
+    setError(null);
+    try {
+      const result = await apiPrepare();
+      setPrepared(result);
+      setLaunchId(result.launchId);
+      setLaunchPhase("prepared");
+      relayKeyRef.current = null;
+      void crossCheckDigest(result);
+    } catch (cause) {
+      setError(describeApiError(cause));
+    }
+  }
+
+  /**
+   * Cross-check the backend digest against the on-chain LaunchSupport view and
+   * our own viem EIP-712 computation (START-HERE fact #2).
+   */
+  async function crossCheckDigest(result: NonNullable<typeof prepared>) {
+    try {
+      const local = computeLaunchDigest(
+        { chainId: result.chainId, verifyingContract: result.domain.verifyingContract as Hex },
+        result.config,
+      );
+      if (local.toLowerCase() !== result.digest.toLowerCase()) {
+        setDigestCheck("mismatch");
+        return;
+      }
+      if (protocol.addresses) {
+        const onchain = (await wallet.publicClient.readContract({
+          address: protocol.addresses.launchSupport as Hex,
+          abi: launchSupportAbi,
+          functionName: "launchDigest",
+          args: [
+            {
+              creator: result.config.creator as Hex,
+              name: result.config.name,
+              symbol: result.config.symbol,
+              uri: result.config.uri,
+              totalSupply: BigInt(result.config.totalSupply),
+              devBuyShareWad: wei(result.config.devBuyShareWad),
+              payoutPlan: BigInt(result.config.payoutPlan),
+              deadline: BigInt(result.config.deadline),
+            },
+            protocol.addresses.hook as Hex,
+          ],
+        })) as Hex;
+        setDigestCheck(onchain.toLowerCase() === result.digest.toLowerCase() ? "ok" : "mismatch");
+      } else {
+        setDigestCheck("ok");
+      }
+    } catch {
+      setDigestCheck("unknown");
+    }
+  }
+
+  async function relay() {
+    if (!prepared) return;
+    setError(null);
+    setRelayError(null);
+    setLaunchPhase("relaying");
+    relayKeyRef.current ??= newIdempotencyKey();
+    try {
+      await relayMutation.mutateAsync({ launchId: prepared.launchId, idempotencyKey: relayKeyRef.current });
+      setLaunchPhase("pending");
+    } catch (cause) {
+      setLaunchPhase("prepared");
+      setRelayError(describeApiError(cause));
+    }
+  }
+
+  async function directLaunch() {
+    if (!prepared || !wallet.address || !wallet.walletClient || !protocol.addresses) return;
+    setError(null);
+    setLaunchPhase("submitting");
+    try {
+      const config = {
+        creator: prepared.config.creator as Hex,
+        name: prepared.config.name,
+        symbol: prepared.config.symbol,
+        uri: prepared.config.uri,
+        totalSupply: BigInt(prepared.config.totalSupply),
+        devBuyShareWad: wei(prepared.config.devBuyShareWad),
+        payoutPlan: BigInt(prepared.config.payoutPlan),
+        deadline: BigInt(prepared.config.deadline),
+      };
+      const value = prepared.devBuyQuote
+        ? BigInt(prepared.devBuyQuote.suggestedMsgValueWithHeadroom)
+        : 0n;
+      const hash = await wallet.walletClient.writeContract({
+        address: protocol.addresses.hook as Hex,
+        abi: milestoneHookAbi,
+        functionName: "launch",
+        args: [config, "0x"],
+        value,
+        account: wallet.address,
+        chain: wallet.walletClient.chain ?? null,
+      });
+      void wallet.publicClient.waitForTransactionReceipt({ hash, pollingInterval: 1_500, timeout: 240_000 }).then((receipt) => {
+        if (receipt.status === "success") setLaunchPhase("pending");
+        else {
+          setLaunchPhase("prepared");
+          setError("Direct launch reverted on-chain. Check the dev-buy budget and deadline freshness, then retry.");
+        }
+      });
+      setLaunchPhase("pending");
+    } catch (cause) {
+      setLaunchPhase("prepared");
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setError(
+        /rejected|denied|cancelled/i.test(message)
+          ? "Launch rejected in your wallet."
+          : `Direct launch failed: ${message}`,
+      );
+    }
+  }
+
+  const confirmedPoolId =
+    record.data?.state === "CONFIRMED" ? (record.data.onchain?.poolId ?? null) : null;
+  const recordFailed = record.data?.state === "FAILED";
+  useEffect(() => {
+    if (!confirmedPoolId) return;
+    const timer = window.setTimeout(() => router.push(`/tokens/${confirmedPoolId}`), 1_500);
+    return () => window.clearTimeout(timer);
+  }, [confirmedPoolId, router]);
+  const relayFailure =
+    launchPhase === "pending" && recordFailed
+      ? (record.data?.failureReason ?? "The relayed launch failed.")
+      : null;
+  const launchInFlight = (launchPhase === "relaying" || launchPhase === "pending") && !recordFailed;
+
+  const stepValid = [
+    identityValid,
+    !planTooWide,
+    devBuyWithinCap,
+    Boolean(wallet.address),
+  ][step];
+
   return (
-    <>
-      <h3>Select the payout plan</h3>
-      <p className={INTRO}>
-        A 256-bit plan selects registry plugins that share each milestone pot.
-        You are the mandatory remainder — every unallocated wei (and any
-        redirected plugin share) accrues to your creator path. The plan is
-        immutable after launch.
-      </p>
-      {registry.length ? (
-        <ul className="m-0 grid list-none gap-3 p-0">
-          {registry.map((entry) => {
-            const selected = hasPlanBit(BigInt(draft.payoutPlan), entry.index);
-            const take = (BigInt(entry.takeWad) * 100n) / 10n ** 18n;
-            return (
-              <li key={entry.index}>
-                <button
-                  type="button"
-                  aria-pressed={selected}
-                  disabled={entry.suspended || entry.role !== "payout"}
-                  onClick={() => onToggle(entry.index)}
-                  className="grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border border-rule bg-raised px-4 py-3 text-left aria-pressed:border-ink aria-pressed:border-2 disabled:cursor-not-allowed disabled:opacity-50 max-[30rem]:grid-cols-1"
-                >
-                  <span className="grid gap-1">
-                    <strong>
-                      #{entry.index} · Buyback and burn
-                      {entry.suspended ? " (suspended)" : ""}
-                    </strong>
-                    <span className="text-sm text-ink-muted">
-                      Spends its pot share buying the launch token and burning
-                      it. Registered take {take.toString()}%.
-                    </span>
-                  </span>
-                  <span className="font-mono text-sm font-bold text-accent-strong">
-                    {selected ? "Selected" : "Select"}
-                  </span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      ) : (
-        <p className="text-ink-muted">Registry entries are unavailable.</p>
-      )}
-      <div className="mt-5 grid gap-2 border-y-2 border-ink py-3 font-mono font-bold">
-        <span className="flex justify-between">
-          <span>Selected plugins</span>
-          <span>{summary.selectedIndices.length} / 8</span>
-        </span>
-        <span className="flex justify-between">
-          <span>Plugin takes</span>
-          <span>{summary.takeSumPercent}%</span>
-        </span>
-        <span className="flex justify-between text-accent-strong">
-          <span>Creator remainder</span>
-          <span>{summary.creatorRemainderPercent}%</span>
-        </span>
-      </div>
-      {error && (
-        <p className={`${ERROR} mt-3`} role="alert" tabIndex={-1}>
-          {error}
+    <main className={`${PAGE_WIDTH} py-12`} id="main-content">
+      <header className="mb-8 border-b-2 border-ink pb-6">
+        <p className="m-0 font-mono text-[0.68rem] font-bold uppercase tracking-[0.08em] text-accent-strong">
+          Launchpad · trusted-operator relay
         </p>
-      )}
-    </>
-  );
-}
+        <h1 className="my-2 text-[clamp(2.2rem,5vw,3.5rem)] font-black tracking-[-0.04em]">
+          Create a token
+        </h1>
+        <p className="m-0 max-w-2xl text-ink-muted">
+          Supply is pinned to <strong>1,000,000,000</strong> tokens, every launch opens at a 2 ETH FDV
+          and graduates at ~4× onto Uniswap v4. You never sign: the protocol operator relays the
+          launch — or send it directly from your wallet to include a dev buy.
+        </p>
+      </header>
 
-interface DevBuyProps {
-  draft: LaunchDraft;
-  summary: ReturnType<typeof planSummary>;
-  error?: string;
-  setField: <K extends keyof LaunchDraft>(
-    key: K,
-    value: LaunchDraft[K],
-  ) => void;
-}
+      <nav className="mb-8 flex flex-wrap gap-2" aria-label="Launch steps">
+        {STEPS.map((label, index) => (
+          <button
+            key={label}
+            type="button"
+            aria-current={step === index ? "step" : undefined}
+            disabled={index > step && !stepValid}
+            className={[
+              "min-h-10 cursor-pointer rounded-sm border-2 px-4 py-2 text-sm font-bold",
+              step === index
+                ? "border-ink bg-ink text-inverse"
+                : "border-rule text-ink-muted hover:border-ink hover:text-ink",
+            ].join(" ")}
+            onClick={() => setStep(index)}
+          >
+            {index + 1}. {label}
+          </button>
+        ))}
+      </nav>
 
-function DevBuyStep({ draft, summary, error, setField }: DevBuyProps) {
-  return (
-    <>
-      <h3>Declare a dev buy</h3>
-      <p className={INTRO}>
-        A creator-direct launch may buy up to 10% of supply on ordinary buyer
-        terms — no vesting, no lockup: tokens transfer fully at launch. A
-        relayed launch executes no dev buy and the share stays curve inventory.
-      </p>
-      <label className="inline-flex min-h-target cursor-pointer items-center gap-3 font-bold">
-        <input
-          className="size-5 accent-accent"
-          type="checkbox"
-          checked={draft.devBuyEnabled}
-          onChange={(event) => setField("devBuyEnabled", event.target.checked)}
-        />
-        Include a dev buy
-      </label>
-      {draft.devBuyEnabled && (
-        <div className="mt-6 grid grid-cols-2 gap-5 border-l-[3px] border-accent pl-5 max-[34rem]:grid-cols-1">
-          <label className={FIELD}>
-            <span>Share of supply, %</span>
-            <input
-              type="number"
-              min="0.01"
-              max="10"
-              step="0.25"
-              value={draft.devBuyPercent}
-              aria-invalid={Boolean(error)}
-              onChange={(event) =>
-                setField("devBuyPercent", Number(event.target.value))
-              }
-            />
-            {error && <span className={ERROR}>{error}</span>}
-          </label>
-          <div className="grid content-start gap-2 text-sm">
-            <span className="font-bold">Pre-launch quote (pure math)</span>
-            <span>
-              Tokens received: {summary.devBuyTokens} {draft.symbol || "tokens"}
-            </span>
-            <span>ETH cost on the fresh curve: {summary.devBuyEthCost}</span>
-            <span>
-              Suggested msg.value (+5% headroom):{" "}
-              {formatEth(summary.devBuyBudget, 3)}
-            </span>
-            <span className="text-xs text-ink-muted">
-              Exact-input semantics bound the spend at the attached budget;
-              unused ETH refunds automatically.
-            </span>
+      <StatusRegion className="mb-6">
+        {protocol.undeployed ? (
+          <StatusMessage tone="warning" title="Protocol not deployed">
+            The backend has no deployment manifest for chain {wallet.targetChainId} yet — launches
+            return <code>PROTOCOL_NOT_DEPLOYED</code>. The wizard stays fully usable and will work
+            the moment the deployment syncs.
+          </StatusMessage>
+        ) : null}
+        {error ? <StatusMessage tone="error" onDismiss={() => setError(null)}>{error}</StatusMessage> : null}
+      </StatusRegion>
+
+      <div className="grid grid-cols-[minmax(0,1fr)_minmax(20rem,26rem)] gap-[clamp(2rem,5vw,4rem)] items-start max-[68rem]:grid-cols-1">
+        <div className="min-w-0">
+          {step === 0 ? (
+            <div className="grid gap-5">
+              <InputField
+                id="launch-name"
+                label="Token name"
+                hint="1–80 characters. Goes on-chain."
+                value={draft.name}
+                onChange={(event) => set("name", event.target.value)}
+                maxLength={80}
+              />
+              <InputField
+                id="launch-symbol"
+                label="Ticker symbol"
+                hint="1–12 characters, A–Z / 0–9. Goes on-chain."
+                value={draft.symbol}
+                onChange={(event) => set("symbol", event.target.value.toUpperCase())}
+                maxLength={12}
+              />
+              <TextareaField
+                id="launch-description"
+                label="Description"
+                hint={`5–100 words (currently ${descriptionWords}). Stored off-chain on IPFS.`}
+                value={draft.description}
+                onChange={(event) => set("description", event.target.value)}
+                rows={4}
+              />
+              <div className="grid gap-2">
+                <span className="text-[0.9375rem] font-bold text-ink">Logo</span>
+                <label
+                  {...labelProps}
+                  htmlFor="launch-logo-input"
+                  className={[
+                    "grid min-h-32 cursor-pointer place-items-center rounded-sm border-2 border-dashed p-6 text-center transition-colors",
+                    dragging ? "border-focus bg-raised" : "border-ink-muted",
+                  ].join(" ")}
+                >
+                  {draft.imageUri ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={draft.imageUri} alt="Uploaded logo" className="max-h-36 object-contain" />
+                  ) : uploading ? (
+                    <span className="font-mono text-sm text-ink-muted">Uploading to IPFS…</span>
+                  ) : (
+                    <span className="text-sm text-ink-muted">
+                      Drop an image or click to upload (PNG/JPEG/WEBP/GIF ≤ 4.3MB)
+                    </span>
+                  )}
+                </label>
+                <input
+                  ref={inputRef}
+                  id="launch-logo-input"
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  className="sr-only"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void handleLogo(file);
+                  }}
+                />
+                {uploadError ? <span className="text-xs font-bold text-error">{uploadError}</span> : null}
+                <InputField
+                  id="launch-image-uri"
+                  label="Or paste an ipfs:// URI"
+                  optional
+                  value={draft.imageUri}
+                  onChange={(event) => set("imageUri", event.target.value)}
+                  placeholder="ipfs://bafk…"
+                />
+              </div>
+              <fieldset className="grid gap-4 border-0 p-0">
+                <legend className="mb-1 p-0 text-[0.9375rem] font-bold text-ink">Socials (optional, https)</legend>
+                <InputField id="launch-website" label="Website" optional value={draft.website} onChange={(event) => set("website", event.target.value)} placeholder="https://…" />
+                <InputField id="launch-x" label="X / Twitter" optional value={draft.x} onChange={(event) => set("x", event.target.value)} placeholder="https://x.com/…" />
+                <InputField id="launch-telegram" label="Telegram" optional value={draft.telegram} onChange={(event) => set("telegram", event.target.value)} placeholder="https://t.me/…" />
+                <InputField id="launch-discord" label="Discord" optional value={draft.discord} onChange={(event) => set("discord", event.target.value)} placeholder="https://discord.gg/…" />
+              </fieldset>
+            </div>
+          ) : null}
+
+          {step === 1 ? (
+            <div className="grid gap-5">
+              <p className="m-0 text-sm text-ink-muted">
+                Harvested pot value is delivered to selected payout plugins in registry order; the
+                creator is the mandatory remainder. An empty plan sends everything to the creator
+                path. Max 8 plugins, takes must total ≤ 100%.
+              </p>
+              {protocol.undeployed || selectablePlugins.length === 0 ? (
+                <p className="border border-rule bg-raised p-4 text-sm text-ink-muted">
+                  The plugin registry mirror is empty until the indexer syncs. The canonical plan
+                  (buyback-and-burn, registry index 0) is preselected and validated against the live
+                  registry at prepare time.
+                </p>
+              ) : (
+                selectablePlugins.map((entry) => (
+                  <CheckboxField
+                    key={entry.registryIndex}
+                    id={`plugin-${entry.registryIndex}`}
+                    checked={hasPlanBit(selectedPlan, entry.registryIndex)}
+                    label={`Registry #${entry.registryIndex} — ${entry.plugin.slice(0, 10)}…`}
+                    hint={`take ${truncateDecimals(formatWad(wei(entry.takeWad)))}% · gas ${entry.gasLimit.toLocaleString()}`}
+                    onChange={(event) => {
+                      const next = event.target.checked
+                        ? withPlanBit(selectedPlan, entry.registryIndex)
+                        : withoutPlanBit(selectedPlan, entry.registryIndex);
+                      set("payoutPlan", next.toString());
+                    }}
+                  />
+                ))
+              )}
+              <div className="border-2 border-ink bg-raised p-4 font-mono text-sm">
+                <p className="m-0">
+                  Plan bits: <strong>{planIndices(selectedPlan).join(", ") || "none (100% creator path)"}</strong>
+                </p>
+                <p className="m-0 mt-1">
+                  Plugin takes: <strong>{truncateDecimals(formatWad(planTakes))}%</strong> · creator
+                  remainder: <strong>{truncateDecimals(formatWad(WAD - planTakes))}%</strong>
+                </p>
+                {planTooWide ? (
+                  <p className="m-0 mt-1 text-error">Selected plugins exceed 8 entries or 100% takes.</p>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          {step === 2 ? (
+            <div className="grid gap-5">
+              <fieldset className="grid gap-3 border-0 p-0">
+                <legend className="p-0 text-[0.9375rem] font-bold text-ink">Launch mode</legend>
+                <CheckboxField
+                  id="mode-relay"
+                  checked={draft.mode === "relay"}
+                  label="Relayed launch — the protocol operator signs and broadcasts (recommended)"
+                  hint="Relayed launches skip the dev buy: the share stays curve inventory."
+                  onChange={(event) => {
+                    set("mode", event.target.checked ? "relay" : "direct");
+                    if (event.target.checked) set("devBuyEnabled", false);
+                  }}
+                />
+                <CheckboxField
+                  id="mode-direct"
+                  checked={draft.mode === "direct"}
+                  label="Direct launch — your wallet sends launch(config, 0x) with the dev-buy budget"
+                  hint="Required if you want a dev buy. Unused ETH auto-refunds."
+                  onChange={(event) => {
+                    set("mode", event.target.checked ? "direct" : "relay");
+                    if (!event.target.checked) set("devBuyEnabled", false);
+                  }}
+                />
+              </fieldset>
+              <CheckboxField
+                id="devbuy-enabled"
+                checked={draft.devBuyEnabled && draft.mode === "direct"}
+                disabled={draft.mode !== "direct"}
+                label="Dev buy (creator purchases at launch)"
+                hint={`Hard cap 10% of supply (${formatWad(MAX_DEV_BUY_SHARE_WAD)} share).`}
+                onChange={(event) => set("devBuyEnabled", event.target.checked)}
+              />
+              {draft.devBuyEnabled && draft.mode === "direct" ? (
+                <InputField
+                  id="devbuy-percent"
+                  label="Dev buy share (% of supply, ≤ 10)"
+                  value={draft.devBuyPercent}
+                  onChange={(event) => set("devBuyPercent", event.target.value.replace(/[^0-9.]/g, ""))}
+                  inputMode="decimal"
+                  error={
+                    !devBuyWithinCap ? "Dev-buy share exceeds the 10% protocol cap." : undefined
+                  }
+                />
+              ) : null}
+              <div className="border-2 border-ink bg-raised p-4 font-mono text-sm">
+                <p className="m-0">
+                  If enabled you buy{" "}
+                  <strong>
+                    {formatCompactEth(
+                      ((FIXED_TOTAL_SUPPLY * wei(devBuyShareWad)) / WAD).toString(),
+                      0,
+                    )}{" "}
+                    tokens
+                  </strong>{" "}
+                  at fresh-curve cost — the exact ETH is quoted at review and unused value is
+                  refunded by the hook.
+                </p>
+              </div>
+            </div>
+          ) : null}
+
+          {step === 3 ? (
+            <div className="grid gap-5">
+              {!wallet.address ? (
+                <div className="border-2 border-ink bg-raised p-6 text-center">
+                  <p className="m-0 mb-4 text-sm text-ink-muted">
+                    Your wallet is the declared creator: it receives the RevenueNFT — the permanent
+                    claim right to direct creator revenue. Transferring the NFT transfers the stream.
+                  </p>
+                  <Button onClick={() => void wallet.connect().catch((cause) => setError((cause as Error).message))}>
+                    Connect wallet to continue
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <dl className="m-0 grid grid-cols-2 gap-x-6 gap-y-3 border-y border-rule py-4 text-sm max-[40rem]:grid-cols-1 [&_dt]:text-xs [&_dt]:text-ink-muted [&_dd]:m-0 [&_dd]:font-mono [&_dd]:font-bold">
+                    <div>
+                      <dt>Creator wallet (declared)</dt>
+                      <dd>{wallet.address}</dd>
+                    </div>
+                    <div>
+                      <dt>Total supply (pinned)</dt>
+                      <dd>1,000,000,000 {draft.symbol || "TKN"}</dd>
+                    </div>
+                    <div>
+                      <dt>Mode</dt>
+                      <dd>{draft.mode === "relay" ? "Relayed by protocol operator" : "Direct from your wallet"}</dd>
+                    </div>
+                    <div>
+                      <dt>Dev buy</dt>
+                      <dd>
+                        {draft.mode === "relay"
+                          ? "skipped (relayed launches never dev-buy)"
+                          : draft.devBuyEnabled
+                            ? `${draft.devBuyPercent}% of supply`
+                            : "none"}
+                      </dd>
+                    </div>
+                  </dl>
+                  <SelectField
+                    id="launch-deadline"
+                    label="Signature deadline window"
+                    hint="Expired configs can be re-prepared — the predicted token address never moves."
+                    value={String(draft.deadlineMinutes)}
+                    onChange={(event) => set("deadlineMinutes", Number(event.target.value))}
+                  >
+                    <option value="30">30 minutes</option>
+                    <option value="60">1 hour</option>
+                    <option value="240">4 hours</option>
+                    <option value="1440">24 hours</option>
+                  </SelectField>
+
+                  {!prepared ? (
+                    <Button
+                      disabled={prepareMutation.isPending}
+                      onClick={() => void prepare()}
+                      fullWidth
+                    >
+                      {prepareMutation.isPending ? "Validating & uploading metadata…" : "Prepare launch (validate + predict address)"}
+                    </Button>
+                  ) : (
+                    <div className="grid gap-4 border-2 border-ink bg-raised p-5">
+                      <h2 className="m-0 text-xl">Ready to launch</h2>
+                      <ul className="m-0 grid list-none gap-2 p-0 font-mono text-xs">
+                        <li className="flex justify-between gap-2">
+                          <span className="text-ink-muted">predicted token (CREATE2)</span>
+                          <strong>{prepared.predictedToken}</strong>
+                        </li>
+                        <li className="flex justify-between gap-2">
+                          <span className="text-ink-muted">opening → graduation level</span>
+                          <strong>
+                            {formatLevel(prepared.openingLevel)} → {formatLevel(prepared.farLevel)}
+                          </strong>
+                        </li>
+                        <li className="flex justify-between gap-2">
+                          <span className="text-ink-muted">opening price</span>
+                          <strong>{formatSubscriptPrice(formatEther(ethPerTokenWei(prepared.openingLevel)))} {draft.symbol || "TKN"}</strong>
+                        </li>
+                        <li className="flex justify-between gap-2">
+                          <span className="text-ink-muted">configHash</span>
+                          <strong className="truncate">{prepared.configHash.slice(0, 22)}…</strong>
+                        </li>
+                        <li className="flex justify-between gap-2">
+                          <span className="text-ink-muted">EIP-712 digest {digestCheck === "ok" ? "✓ verified vs on-chain view" : digestCheck === "mismatch" ? "⚠ MISMATCH" : "(verifying…)"}</span>
+                          <strong className="truncate">{prepared.digest.slice(0, 22)}…</strong>
+                        </li>
+                        <li className="flex justify-between gap-2">
+                          <span className="text-ink-muted">metadata</span>
+                          <strong>{prepared.metadata?.ipfsUri.slice(0, 24) ?? "—"}…</strong>
+                        </li>
+                        {prepared.devBuyQuote ? (
+                          <>
+                            <li className="flex justify-between gap-2">
+                              <span className="text-ink-muted">dev-buy cost (incl. 1% fee)</span>
+                              <strong>{truncateDecimals(formatEther(BigInt(prepared.devBuyQuote.ethCost)))} ETH</strong>
+                            </li>
+                            <li className="flex justify-between gap-2">
+                              <span className="text-ink-muted">msg.value budget (+5% headroom)</span>
+                              <strong>{truncateDecimals(formatEther(BigInt(prepared.devBuyQuote.suggestedMsgValueWithHeadroom)))} ETH</strong>
+                            </li>
+                            <li className="flex justify-between gap-2">
+                              <span className="text-ink-muted">dev-buy tokens out</span>
+                              <strong>{formatCompactEth(prepared.devBuyQuote.tokensOut, 0)}</strong>
+                            </li>
+                          </>
+                        ) : null}
+                      </ul>
+
+                      <StatusRegion>
+                        {relayError || relayFailure ? (
+                          <StatusMessage tone="error" onDismiss={() => setRelayError(null)}>
+                            {relayError ?? relayFailure}
+                          </StatusMessage>
+                        ) : null}
+                        {launchInFlight ? (
+                          <StatusMessage tone="neutral" title="Waiting for confirmation">
+                            {record.data?.transactionHash ? (
+                              <>tx {record.data.transactionHash.slice(0, 18)}… — the indexer binds the
+                              pool by configHash; you&apos;ll be redirected the moment it lands.</>
+                            ) : (launchPhase === "relaying" ? "The operator is signing and broadcasting…" : "Waiting for the launch transaction…")}
+                          </StatusMessage>
+                        ) : null}
+                        {confirmedPoolId ? (
+                          <StatusMessage tone="success" title="Launched — opening pool page">
+                            Token {record.data?.onchain?.token}
+                          </StatusMessage>
+                        ) : null}
+                      </StatusRegion>
+
+                      {draft.mode === "relay" ? (
+                        <Button
+                          disabled={launchInFlight || relayMutation.isPending}
+                          onClick={() => void relay()}
+                          fullWidth
+                        >
+                          {launchInFlight
+                            ? "Launch submitted — waiting for the chain…"
+                            : "Relay launch (operator signs, gasless for you)"}
+                        </Button>
+                      ) : (
+                        <Button
+                          disabled={launchInFlight}
+                          onClick={() => void directLaunch()}
+                          fullWidth
+                        >
+                          {launchPhase === "submitting"
+                            ? "Check your wallet…"
+                            : launchPhase === "pending"
+                              ? "Launch pending…"
+                              : `Send launch from wallet${prepared.devBuyQuote ? ` (${truncateDecimals(formatEther(BigInt(prepared.devBuyQuote.suggestedMsgValueWithHeadroom)))} ETH budget)` : ""}`}
+                        </Button>
+                      )}
+                      <p className="m-0 text-xs text-ink-muted">{prepared.signatureNote}</p>
+                      <Button
+                        variant="quiet"
+                        onClick={() => {
+                          setPrepared(null);
+                          setLaunchId(null);
+                          setLaunchPhase("idle");
+                        }}
+                      >
+                        Re-prepare (fresh deadline)
+                      </Button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          ) : null}
+
+          <div className="mt-8 flex justify-between">
+            <Button variant="secondary" disabled={step === 0} onClick={() => setStep((s) => Math.max(0, s - 1))}>
+              Back
+            </Button>
+            <Button
+              disabled={step === STEPS.length - 1 || !stepValid}
+              onClick={() => setStep((s) => Math.min(STEPS.length - 1, s + 1))}
+            >
+              Next
+            </Button>
           </div>
         </div>
-      )}
-    </>
+
+        <aside className="sticky top-4 grid gap-4" aria-label="Launch preview">
+          <div className="overflow-hidden rounded-xl border-2 border-ink bg-carbon text-[#e9e7e0]">
+            <div className="grid h-40 place-items-center overflow-hidden bg-[#14100d]">
+              {draft.imageUri ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={draft.imageUri} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <span className="font-mono text-sm text-[#e9e7e0]/50">preview</span>
+              )}
+            </div>
+            <div className="grid gap-2 p-4">
+              <p className="m-0 text-sm font-bold">{draft.name || "Your token name"}</p>
+              <p className="m-0 font-mono text-xs text-[#f5c518]">{draft.symbol || "SYMBOL"}</p>
+              <p className="m-0 line-clamp-3 text-xs text-[#e9e7e0]/70">
+                {draft.description || "Your description appears here."}
+              </p>
+            </div>
+          </div>
+          <div className="border border-rule bg-raised p-4 font-mono text-xs">
+            <p className="m-0 font-bold uppercase text-ink-muted">Economics preview</p>
+            <ul className="mt-2 m-0 grid gap-1 p-0">
+              <li className="flex justify-between"><span className="text-ink-muted">opening FDV</span><strong>2 ETH</strong></li>
+              <li className="flex justify-between"><span className="text-ink-muted">graduation</span><strong>~8 ETH FDV (≈4×)</strong></li>
+              <li className="flex justify-between"><span className="text-ink-muted">curve / ladder / wall+LP</span><strong>250M / 100M / 650M</strong></li>
+              <li className="flex justify-between"><span className="text-ink-muted">graduation split</span><strong>70% creator / 20% LP / 10% proto</strong></li>
+              <li className="flex justify-between"><span className="text-ink-muted">trading fee</span><strong>1% static</strong></li>
+            </ul>
+          </div>
+        </aside>
+      </div>
+    </main>
   );
 }
 
-interface ReviewProps {
-  draft: LaunchDraft;
-  registry: Awaited<
-    ReturnType<
-      ReturnType<typeof useDemo>["client"]["listPluginEntries"]
-    >
-  >;
-  summary: ReturnType<typeof planSummary>;
-  predictedToken: string | null;
+function describeApiError(cause: unknown): string {
+  if (cause instanceof ApiError) {
+    const fieldErrors = cause.fieldErrors.length
+      ? ` ${cause.fieldErrors.map((e) => `${e.path}: ${e.message}`).join("; ")}`
+      : "";
+    const byCode: Record<string, string> = {
+      SUPPLY_NOT_FIXED: "Total supply is pinned to 1,000,000,000 — it cannot be changed.",
+      DEV_BUY_ABOVE_CAP: "Dev-buy share exceeds the 10% cap.",
+      PAYOUT_PLAN_TOO_MANY_PLUGINS: "A plan selects at most 8 payout plugins.",
+      PAYOUT_PLAN_ENTRY_SUSPENDED: "A selected plugin is suspended by governance.",
+      PAYOUT_PLAN_ENTRY_NOT_SELECTABLE: "A selected registry entry is not a PAYOUT plugin.",
+      PAYOUT_TAKES_ABOVE_WAD: "Selected plugin takes total more than 100%.",
+      OPENING_LEVEL_OUT_OF_RANGE: "The supply places the opening level outside usable tick space.",
+      PROTOCOL_NOT_DEPLOYED: "The protocol is not deployed on this chain yet.",
+      METADATA_UPLOAD_FAILED: "IPFS metadata upload failed — retry shortly.",
+      OPERATOR_NOT_CONFIGURED: "The backend operator key is not provisioned — use a direct launch.",
+      RELAY_DISABLED: "Relayed launches are disabled (trusted operator unset) — use a direct launch.",
+      LAUNCH_BROADCAST_FAILED: "The relayer failed to broadcast the launch.",
+      REQUEST_IN_PROGRESS: "A previous request is still in flight — wait a moment.",
+      IDEMPOTENCY_KEY_REUSED: "This launch was already relayed.",
+      VALIDATION_FAILED: `Validation failed.${fieldErrors}`,
+      RATE_LIMITED: `Rate limited${cause.retryAfterSeconds ? ` — retry after ${cause.retryAfterSeconds}s` : ""}.`,
+      NETWORK_ERROR: "The API is unreachable — is the backend running?",
+    };
+    return `${byCode[cause.code] ?? `Launch API error (${cause.code})`}${cause.requestId ? ` [request ${cause.requestId.slice(0, 8)}]` : ""}`;
+  }
+  return cause instanceof Error ? cause.message : "Unexpected error.";
 }
-
-function ReviewStep({
-  draft,
-  registry,
-  summary,
-  predictedToken,
-}: ReviewProps) {
-  const selected = registry.filter((entry) =>
-    hasPlanBit(BigInt(draft.payoutPlan), entry.index),
-  );
-  return (
-    <>
-      <h3>Review the launch terms</h3>
-      <p className={INTRO}>
-        Every value below enters the signed configuration. The deterministic
-        token address is knowable before launch — derived from the config and
-        your address, so nobody can front-run it.
-      </p>
-      <dl className="m-0 grid grid-cols-2 border-t-2 border-ink max-[38rem]:grid-cols-1 [&>div]:min-w-0 [&>div]:border-b [&>div]:border-rule [&>div]:p-3 [&>div:nth-child(even)]:border-l max-[38rem]:[&>div:nth-child(even)]:border-l-0 [&_dt]:text-xs [&_dt]:font-bold [&_dt]:text-ink-muted [&_dd]:mt-1 [&_dd]:mb-0 [&_dd]:overflow-wrap-anywhere">
-        <div>
-          <dt>Identity</dt>
-          <dd>
-            {draft.name} · ${draft.symbol}
-          </dd>
-        </div>
-        <div>
-          <dt>Total supply</dt>
-          <dd>{draft.totalSupply}</dd>
-        </div>
-        <div>
-          <dt>Opening valuation</dt>
-          <dd>125 ETH FDV · far level at 2x</dd>
-        </div>
-        <div>
-          <dt>Supply allocation</dt>
-          <dd>25% bonding curve · 65% milestone ladder · 10% full-range</dd>
-        </div>
-        <div>
-          <dt>Payout plan</dt>
-          <dd>
-            {selected.length
-              ? selected
-                  .map((entry) => `#${entry.index} buyback-and-burn`)
-                  .join(" · ")
-              : "Empty plan — creator path receives every pot"}
-          </dd>
-        </div>
-        <div>
-          <dt>Plan economics</dt>
-          <dd>
-            Plugins {summary.takeSumPercent}% · creator remainder{" "}
-            {summary.creatorRemainderPercent}%
-          </dd>
-        </div>
-        <div>
-          <dt>Dev buy</dt>
-          <dd>
-            {draft.devBuyEnabled
-              ? `${draft.devBuyPercent}% of supply (${summary.devBuyTokens} tokens), no lockup`
-              : "Not included"}
-          </dd>
-        </div>
-        <div>
-          <dt>Signing deadline</dt>
-          <dd>{draft.deadlineMinutes} minutes from now</dd>
-        </div>
-        <div>
-          <dt>Description</dt>
-          <dd>{draft.description.trim() || "—"}</dd>
-        </div>
-        <div>
-          <dt>Logo &amp; socials</dt>
-          <dd>
-            {draft.logoUrl ? "Logo on IPFS ✓" : "No logo"}
-            {Object.values(draft.socials).some((value) => value.trim())
-              ? " · socials linked"
-              : ""}
-          </dd>
-        </div>
-        <div>
-          <dt>Predicted token address</dt>
-          <dd>{predictedToken ?? "Deriving…"}</dd>
-        </div>
-        <div>
-          <dt>Graduation split</dt>
-          <dd>40% locked LP · 55% creator · 5% protocol</dd>
-        </div>
-        <div>
-          <dt>Trading fee</dt>
-          <dd>1% static, forever (ETH side on buys, token side on sells)</dd>
-        </div>
-        <div>
-          <dt>Harvest routing</dt>
-          <dd>10% service fee · 90% payout pot · flush tip 1% of new pots</dd>
-        </div>
-      </dl>
-      <p className="mt-5 border-l-[3px] border-accent bg-raised px-4 py-3 text-sm text-ink-muted">
-        Launching records this configuration in the local protocol simulation.
-        When the chain client connects, the same config is signed EIP-712 and
-        submitted to the hook.
-      </p>
-    </>
-  );
-}
-
-export default LaunchConfigurator;

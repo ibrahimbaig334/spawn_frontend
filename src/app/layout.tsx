@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Script from "next/script";
 import "@fontsource-variable/geologica";
 import "@fontsource/commit-mono";
-import { DemoBanner } from "@/components/shell/demo-banner";
+import { ProtocolBanner } from "@/components/shell/protocol-banner";
 import { SiteFooter } from "@/components/shell/site-footer";
 import { SiteHeader } from "@/components/shell/site-header";
 import { Providers } from "./providers";
@@ -22,11 +22,11 @@ const THEME_SCRIPT = `(() => {
 
 export const metadata: Metadata = {
   title: {
-    default: "Spawn — milestone-based token launch concept",
+    default: "Spawn — milestone-based token launchpad",
     template: "%s — Spawn",
   },
   description:
-    "An interactive concept for milestone-based token launches, using demonstration data only.",
+    "Launch and trade milestone-backed tokens on Base: bonding curve to graduation, protocol-owned sell ladder, creator revenue streams.",
 };
 
 export default function RootLayout({
@@ -44,10 +44,12 @@ export default function RootLayout({
         >
           Skip to main content
         </a>
-        <DemoBanner />
-        <SiteHeader />
-        <Providers>{children}</Providers>
-        <SiteFooter />
+        <Providers>
+          <ProtocolBanner />
+          <SiteHeader />
+          {children}
+          <SiteFooter />
+        </Providers>
       </body>
     </html>
   );

@@ -17,10 +17,13 @@
  */
 
 import {
+  BAND_FIRST_STEP_LEVELS,
   BAND_LEVEL_SPACING,
+  BAND_STEP_DECAY_LEVELS,
   BAND_WIDTH_LEVELS,
   CURVE_POSITIONS,
   CURVE_SPAN_LEVELS,
+  LEVELS_PER_DOUBLING,
   OPENING_FDV_WEI,
 } from "./constants";
 
@@ -120,23 +123,41 @@ export function openingLevelFor(totalSupplyWei: bigint): number {
   return low;
 }
 
-/** Far level: exactly CURVE_SPAN_LEVELS above opening (2x opening FDV). */
+/** Far level: exactly CURVE_SPAN_LEVELS above opening (two doublings: ~4x opening FDV). */
 export function farLevelFor(openingLevel: number): number {
   return openingLevel + CURVE_SPAN_LEVELS;
 }
 
-/** Band i geometry: levelLower(i) = graduationLevel + (i+1) * spacing, upper = lower + width. */
+/**
+ * Band i's lower offset above graduation, decaying-step schedule (LadderLib
+ * closed form): band i+1 starts max(spacing, firstStep − decay·i) levels
+ * above band i — a 2x first step locking at the 1.2504x floor.
+ */
+export function bandStepOffset(index: number): number {
+  const m = BigInt(index) + 1n;
+  const first = BigInt(BAND_FIRST_STEP_LEVELS);
+  const decay = BigInt(BAND_STEP_DECAY_LEVELS);
+  const spacing = BigInt(BAND_LEVEL_SPACING);
+  const k = (first - spacing) / decay;
+  const offset =
+    m <= k + 1n
+      ? first * m - (decay * m * (m - 1n)) / 2n
+      : first * (k + 1n) - (decay * k * (k + 1n)) / 2n + (m - k - 1n) * spacing;
+  return Number(offset);
+}
+
+/** Band i geometry: decaying steps, fixed width. */
 export function bandLevels(
   graduationLevel: number,
   index: number,
 ): { levelLower: number; levelUpper: number } {
-  const levelLower = graduationLevel + (index + 1) * BAND_LEVEL_SPACING;
+  const levelLower = graduationLevel + bandStepOffset(index);
   return { levelLower, levelUpper: levelLower + BAND_WIDTH_LEVELS };
 }
 
 /** Market-cap multiple a band's lower bound sits above the graduation level. */
 export function bandRungMultiple(index: number): number {
-  return 1.0001 ** ((index + 1) * BAND_LEVEL_SPACING);
+  return 1.0001 ** bandStepOffset(index);
 }
 
 /** Curve position i spans [opening + i * span/positions, far] (integration §3.1). */
@@ -171,7 +192,4 @@ export function levelToTick(level: number): number {
   return -level;
 }
 
-/** Doubling distance helper for display copy ("2x every 6931 levels"). */
-export const LEVELS_PER_DOUBLING = CURVE_SPAN_LEVELS;
-
-export { BAND_LEVEL_SPACING, BAND_WIDTH_LEVELS, CURVE_SPAN_LEVELS };
+export { BAND_LEVEL_SPACING, BAND_WIDTH_LEVELS, CURVE_SPAN_LEVELS, LEVELS_PER_DOUBLING };

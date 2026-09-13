@@ -1,116 +1,72 @@
 "use client";
 
 import Link from "next/link";
-import { DEMO_DISCLOSURE } from "@/content/product-copy";
-import {
-  deriveCurveProgress,
-  deriveFdvEth,
-  derivePhaseLabel,
-  selectWatchlistedLaunches,
-} from "@/domain/selectors";
-import { formatEth } from "@/lib/format";
-import { useDemo } from "@/state/use-demo";
-import {
-  BOOKMARK,
-  DISCLOSURE,
-  EMPTY,
-  EYEBROW,
-  HERO,
-  LOADING,
-  PAGE,
-  SECTION,
-  SECTION_HEADER,
-} from "./portfolio-styles";
+import { useWatchlist } from "@/lib/watchlist";
+import { usePoolCards } from "@/lib/use-pool-cards";
+import { Button } from "@/components/ui";
+import { relativeTime, usdApproxFromEthWei } from "@/lib/display";
+import { formatSubscriptPrice } from "@/lib/format";
+import { PAGE, EYEBROW, SECTION, SECTION_HEADER, EMPTY } from "./portfolio-styles";
 
 export function PortfolioWatchlist() {
-  const { state, dispatch } = useDemo();
-  if (state.runtime.hydration === "pending")
-    return (
-      <section className={LOADING}>
-        <p>Loading browser-local data</p>
-        <h1>Preparing watchlist.</h1>
-      </section>
-    );
-  const launches = selectWatchlistedLaunches(state);
+  const watchlist = useWatchlist();
+  const cards = usePoolCards([...watchlist.poolIds]);
+
+  const rows = cards
+    .map((query, index) => ({ poolId: watchlist.poolIds[index]!, detail: query.data ?? null }))
+    .filter((entry) => entry.detail)
+    .map((entry) => entry.detail!);
+
   return (
-    <article className={PAGE}>
-      <header className={HERO}>
-        <div>
-          <p className={EYEBROW}>Browser-local watchlist</p>
-          <h1>Pools worth revisiting.</h1>
-        </div>
-        <p>
-          Bookmarks stay in this browser and do not represent ownership,
-          endorsement, notifications, or a live market subscription.
-        </p>
-      </header>
-      <p className={DISCLOSURE}>{DEMO_DISCLOSURE}</p>
-      <section className={SECTION} aria-labelledby="watchlist-title">
+    <main className={PAGE} id="main-content">
+      <p className={EYEBROW}>Portfolio</p>
+      <h1 className="mt-2 mb-0 text-[clamp(2.5rem,6vw,5rem)] leading-[0.95]">Watchlist</h1>
+      <section className={SECTION}>
         <header className={SECTION_HEADER}>
-          <h2 id="watchlist-title">Watched tokens</h2>
-          <span>{launches.length}</span>
-        </header>
-        {launches.length ? (
           <div>
-            {launches.map((launch) => (
-              <article
-                className="grid grid-cols-[minmax(12rem,.7fr)_minmax(22rem,1fr)_auto] items-center gap-x-8 gap-y-6 border-b border-rule py-5 break-inside-avoid max-[62rem]:grid-cols-1"
-                key={launch.poolId}
-              >
-                <div>
-                  <p className="m-0 text-xs text-ink-muted">
-                    ${launch.symbol}
-                  </p>
-                  <h3 className="my-1 text-xl">
-                    <Link href={`/tokens/${launch.slug}`}>{launch.name}</Link>
-                  </h3>
-                  <p className="m-0 text-xs text-ink-muted">
-                    Level {launch.level} · pot {formatEth(launch.payoutPotWei, 3)}
-                  </p>
-                </div>
-                <dl className="m-0 grid grid-cols-3 max-[42rem]:grid-cols-2 max-[28rem]:grid-cols-1 [&>div]:px-3 [&>div]:py-2 [&>div+div]:border-l [&>div+div]:border-rule max-[42rem]:[&>div:nth-child(3)]:border-t max-[42rem]:[&>div:nth-child(3)]:border-l-0 max-[28rem]:[&>div]:border-t max-[28rem]:[&>div]:border-l-0 [&_dt]:text-xs [&_dt]:text-ink-muted [&_dd]:mt-1 [&_dd]:mb-0 [&_dd]:font-mono [&_dd]:text-xs [&_dd]:font-bold">
-                  <div>
-                    <dt>FDV</dt>
-                    <dd>{formatEth(deriveFdvEth(launch), 2)}</dd>
-                  </div>
-                  <div>
-                    <dt>Phase</dt>
-                    <dd>{derivePhaseLabel(launch)}</dd>
-                  </div>
-                  <div>
-                    <dt>Curve progress</dt>
-                    <dd>{(deriveCurveProgress(launch) * 100).toFixed(1)}%</dd>
-                  </div>
-                </dl>
-                <div className="grid gap-2 max-[62rem]:grid-cols-2 max-[28rem]:grid-cols-1 print:hidden">
-                  <button
-                    className="inline-flex min-h-target cursor-pointer items-center justify-center gap-2 border border-rule bg-transparent px-3 py-2 font-bold"
-                    type="button"
-                    onClick={() =>
-                      dispatch({ type: "toggle-watch", id: launch.poolId })
-                    }
-                  >
-                    <span className={BOOKMARK} aria-hidden="true" />
-                    Remove
-                  </button>
-                  <Link
-                    className="inline-flex min-h-target items-center justify-center border border-ink bg-ink px-3 py-2 font-bold text-inverse no-underline"
-                    href={`/tokens/${launch.slug}`}
-                  >
-                    Inspect token
-                  </Link>
-                </div>
-              </article>
-            ))}
+            <p className={EYEBROW}>Following</p>
+            <h2>Your pools</h2>
+          </div>
+          <span>{rows.length} pools · stored in this browser</span>
+        </header>
+        {rows.length === 0 ? (
+          <div className={EMPTY}>
+            <h3>Nothing watched yet.</h3>
+            <p>
+              <Link href="/tokens">Browse tokens</Link> and press the bookmark on any pool.
+            </p>
           </div>
         ) : (
-          <div className={EMPTY}>
-            <h3>No watched tokens.</h3>
-            <p>Add bookmarks from the directory or a token detail page.</p>
-            <Link href="/tokens">Browse tokens</Link>
-          </div>
+          <ul className="m-0 list-none border-b border-rule p-0">
+            {rows.map((detail) => (
+              <li key={detail.poolId} className="grid grid-cols-[minmax(0,2fr)_repeat(3,minmax(0,1fr))_auto_auto] items-center gap-4 border-b border-rule py-3">
+                <Link className="truncate font-bold text-ink no-underline hover:underline" href={`/tokens/${detail.poolId}`}>
+                  {detail.name ?? "Unnamed"}{" "}
+                  <span className="font-mono text-xs text-ink-muted">${detail.symbol ?? "—"}</span>
+                </Link>
+                <span className="font-mono text-sm">{detail.status}</span>
+                <span className="font-mono text-sm font-bold">
+                  {detail.priceEth ? `${formatSubscriptPrice(detail.priceEth)} ETH` : "—"}
+                </span>
+                <span className="font-mono text-sm">
+                  {detail.priceEth ? `≈ $${usdApproxFromEthWei(detail.priceEth).toPrecision(2)}` : "—"}
+                </span>
+                <span className="font-mono text-xs text-ink-muted">{relativeTime(detail.launchTime)}</span>
+                <Button variant="quiet" onClick={() => watchlist.remove(detail.poolId)}>
+                  Remove
+                </Button>
+              </li>
+            ))}
+          </ul>
         )}
+        {rows.length > 0 ? (
+          <div className="mt-4">
+            <Button variant="secondary" onClick={watchlist.clear}>
+              Clear watchlist
+            </Button>
+          </div>
+        ) : null}
       </section>
-    </article>
+    </main>
   );
 }

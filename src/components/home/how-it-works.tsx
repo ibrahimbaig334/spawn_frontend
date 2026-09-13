@@ -1,15 +1,15 @@
 const steps = [
   {
     title: "Launch on the curve",
-    body: "One pool per launch opens at the 125 ETH template FDV. The signed configuration — supply, payout plan, optional dev buy — is immutable the moment it lands, and the token address was knowable before the signature.",
+    body: "Every launch is pinned to 1,000,000,000 tokens and opens at the 2 ETH template FDV. The configuration — supply, payout plan, optional dev buy — is immutable the moment it lands, and the CREATE2 token address was knowable before the launch.",
   },
   {
-    title: "Graduate at 2x",
-    body: "When the level reaches the curve top, the pool graduates: curve liquidity burns, proceeds split 40% locked LP / 55% creator / 5% protocol, and a code-locked full-range position takes over.",
+    title: "Graduate at ~4x",
+    body: "When the level reaches the curve top (13,862 levels above opening), the pool graduates: curve liquidity burns, proceeds split 20% LP seed / 70% creator / 10% protocol, and two code-locked positions take over — an ETH-limited full-range band with a hard floor plus a deep token-only wall.",
   },
   {
     title: "Climb the milestone ladder",
-    body: "30 protocol-owned sell bands at 1.2504x rungs stand above graduation. Every crossed band is harvested into the payout pot — 10% service fee, 90% to the pot — and flushed to the launch's selected plugins and the creator path.",
+    body: "22 protocol-owned sell bands on a decaying schedule (2× first step, 1.2504× floor) stand above graduation, extendable by 30 fee-funded bands. Every crossed band is harvested into the payout pot — 10% service fee, 90% to the pot — and flushed to the launch's selected plugins and the creator path.",
   },
 ] as const;
 

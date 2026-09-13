@@ -1,177 +1,250 @@
 "use client";
 
 import Link from "next/link";
-import { formatDemoUtc } from "@/domain/demo-time";
-import {
-  deriveFdvEth,
-  derivePhaseLabel,
-  selectLaunchActivity,
-  selectProfileBySlug,
-  selectProfileLaunches,
-} from "@/domain/selectors";
-import { formatEth } from "@/lib/format";
-import { useDemo } from "@/state/use-demo";
+import { useState } from "react";
+import { Button, Dialog, InputField, StatusMessage, StatusRegion, TextareaField } from "@/components/ui";
+import { useProfile, useProfileTokens, useRevenueStreams, useUpdateProfile } from "@/lib/queries";
+import { useWallet } from "@/lib/chain/wallet";
+import { uploadLogoToIPFS } from "@/services/ipfs-client";
+import { formatCompactEth, formatUtc } from "@/lib/display";
+import { ApiError } from "@/lib/api/client";
+import { isAddress } from "viem";
 
-const UNAVAILABLE =
-  "min-h-[60vh] px-[max(1rem,calc((100vw-80rem)/2))] py-[clamp(4rem,10vw,8rem)] [&>p:first-child]:font-mono [&>p:first-child]:text-xs [&>p:first-child]:font-bold [&>p:first-child]:text-accent-strong [&>p:first-child]:uppercase [&_h1]:max-w-[15ch] [&_h1]:text-[clamp(2.6rem,7vw,5.5rem)] [&_h1]:leading-[0.95]";
+const PAGE =
+  "mx-auto w-full max-w-measure px-[max(1rem,calc((100vw-80rem)/2))]";
 
-export function ProfilePage({ slug }: { slug: string }) {
-  const { state } = useDemo();
-  const profile = selectProfileBySlug(state, slug);
-  if (!profile && state.runtime.hydration === "pending")
-    return (
-      <section className={UNAVAILABLE}>
-        <p>Loading browser-local data</p>
-        <h1>Preparing profile.</h1>
-      </section>
-    );
-  if (!profile)
-    return (
-      <section className={UNAVAILABLE}>
-        <p>Profile unavailable</p>
-        <h1>This profile could not be found.</h1>
-        <p>It may belong to browser-local data that is not available here.</p>
-        <Link className="font-bold underline-offset-4" href="/tokens">
-          Browse tokens
-        </Link>
-      </section>
-    );
-  const launches = selectProfileLaunches(state, profile.id);
-  const activity = launches.flatMap((launch) =>
-    selectLaunchActivity(state, launch.poolId),
-  );
+export function ProfilePage({ walletAddress }: { walletAddress: string }) {
+  const wallet = useWallet();
+  const normalized = walletAddress.toLowerCase();
+  const valid = isAddress(normalized);
+  const profile = useProfile(valid ? normalized : null);
+  const tokens = useProfileTokens(valid ? normalized : null);
+  const streams = useRevenueStreams(valid ? normalized : null);
+  const [editing, setEditing] = useState(false);
+  const isSelf = Boolean(wallet.address && wallet.address.toLowerCase() === normalized);
+
+  const data = profile.data;
+  const display = data?.username ?? null;
+  const avatar = data?.imageUri ?? null;
+
   return (
-    <article className="px-[max(1rem,calc((100vw-80rem)/2))] pt-[clamp(3rem,7vw,6rem)] pb-[clamp(5rem,9vw,8rem)] print:px-0">
-      <header className="grid grid-cols-[clamp(5rem,10vw,8rem)_minmax(0,1fr)] items-start gap-[clamp(1.5rem,4vw,3rem)] border-b-2 border-ink pb-[clamp(2rem,5vw,4rem)] max-[34rem]:grid-cols-1">
-        <span
-          className="grid aspect-square place-items-center border border-ink font-mono text-[clamp(1.2rem,3vw,2rem)] font-bold text-accent-strong max-[34rem]:w-20"
-          aria-hidden="true"
-        >
-          {profile.initials}
-        </span>
-        <div>
-          <p className="m-0 font-mono text-xs font-bold tracking-[0.08em] text-accent-strong uppercase">
-            {profile.kind === "fictional-demo"
-              ? "Fictional demo profile"
-              : "Browser-local demo profile"}
-          </p>
-          <h1 className="my-1 text-[clamp(2.8rem,7vw,6rem)] leading-[0.95] tracking-[-0.05em]">
-            {profile.displayName}
-          </h1>
-          <p className="m-0 font-mono text-xs text-ink-muted">
-            @{profile.handle} · Joined {formatDemoUtc(profile.joinedAt)}
-          </p>
-          <p className="mt-4 mb-0 max-w-3xl text-lg text-ink-muted">
-            {profile.bio}
-          </p>
-        </div>
-      </header>
-      <p className="mt-5 mb-0 border-l-[3px] border-accent bg-raised px-4 py-3 text-sm text-ink-muted">
-        Profile attribution is fictional or browser-local. It does not represent
-        signer identity, verification, wallet ownership, or current ownership of
-        a revenue NFT.
-      </p>
-      <section
-        className="border-b border-rule py-[clamp(2.5rem,6vw,5rem)]"
-        aria-labelledby="profile-launches"
-      >
-        <header className="flex items-end justify-between gap-4">
-          <h2
-            className="m-0 text-[clamp(1.8rem,4vw,3rem)]"
-            id="profile-launches"
-          >
-            Launches
-          </h2>
-          <span className="font-mono text-xs text-ink-muted">
-            {launches.length}
-          </span>
-        </header>
-        {launches.length ? (
-          <div className="mt-4 border-t-2 border-ink">
-            {launches.map((launch) => (
-              <article
-                className="grid grid-cols-[1fr_minmax(24rem,.8fr)] gap-8 border-b border-rule py-5 max-[48rem]:grid-cols-1"
-                key={launch.poolId}
-              >
-                <div>
-                  <p className="m-0 text-xs text-ink-muted">
-                    ${launch.symbol}
-                  </p>
-                  <h3 className="my-1 text-xl">
-                    <Link href={`/tokens/${launch.slug}`}>{launch.name}</Link>
-                  </h3>
-                  <p className="m-0 text-sm text-ink-muted">
-                    Level {launch.level} · pot {formatEth(launch.payoutPotWei, 3)}
-                  </p>
-                </div>
-                <dl className="m-0 grid grid-cols-3 max-[34rem]:grid-cols-1 [&>div]:px-3 [&>div]:py-2 [&>div+div]:border-l [&>div+div]:border-rule max-[34rem]:[&>div+div]:border-t max-[34rem]:[&>div+div]:border-l-0 [&_dt]:text-xs [&_dt]:text-ink-muted [&_dd]:mt-1 [&_dd]:mb-0 [&_dd]:font-mono [&_dd]:text-xs [&_dd]:font-bold">
-                  <div>
-                    <dt>FDV</dt>
-                    <dd>{formatEth(deriveFdvEth(launch), 2)}</dd>
-                  </div>
-                  <div>
-                    <dt>Phase</dt>
-                    <dd>{derivePhaseLabel(launch)}</dd>
-                  </div>
-                  <div>
-                    <dt>Harvested</dt>
-                    <dd>{launch.completedMilestones}</dd>
-                  </div>
-                </dl>
-              </article>
-            ))}
+    <main className={`${PAGE} pb-24`} id="main-content">
+      {!valid ? (
+        <p className="py-24 text-center text-ink-muted">Invalid wallet address.</p>
+      ) : (
+        <>
+          <header className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-6 border-b-2 border-ink py-10 max-[48rem]:grid-cols-1">
+            <div className="flex items-center gap-5 max-[34rem]:flex-col max-[34rem]:items-start">
+              <span className="grid size-20 shrink-0 place-items-center overflow-hidden rounded-full border-2 border-ink bg-raised font-mono text-xl font-black text-accent-strong">
+                {avatar ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={avatar} alt="" className="size-full object-cover" />
+                ) : (
+                  (display ?? normalized.slice(2, 4)).slice(0, 2).toUpperCase()
+                )}
+              </span>
+              <div className="min-w-0">
+                <h1 className="m-0 text-[clamp(1.8rem,4.5vw,3rem)] font-black tracking-[-0.04em]">
+                  {display ?? "Unnamed wallet"}
+                </h1>
+                <p className="m-0 font-mono text-xs text-ink-muted">{normalized}</p>
+                {data?.createdAt ? (
+                  <p className="m-0 font-mono text-xs text-ink-muted">Since {formatUtc(data.createdAt)}</p>
+                ) : null}
+              </div>
+            </div>
+            {isSelf ? (
+              <Button variant="secondary" onClick={() => setEditing(true)}>
+                Edit profile
+              </Button>
+            ) : null}
+          </header>
+          {data?.bio ? (
+            <p className="mt-4 max-w-2xl whitespace-pre-wrap text-ink-muted">{data.bio}</p>
+          ) : null}
+          {profile.isError && (profile.error as ApiError).code === "PROFILE_NOT_FOUND" ? (
+            <p className="mt-4 text-sm text-ink-muted">
+              No profile details for this wallet yet{isSelf ? " — click Edit profile to add a username and bio." : "."}
+            </p>
+          ) : null}
+
+          <div className="mt-10 grid grid-cols-[minmax(0,1fr)_minmax(18rem,24rem)] gap-[clamp(2rem,5vw,4rem)] items-start max-[68rem]:grid-cols-1">
+            <section aria-labelledby="profile-tokens">
+              <h2 className="text-[clamp(1.4rem,3vw,2rem)]" id="profile-tokens">
+                Created launches ({tokens.data?.meta.total ?? 0})
+              </h2>
+              {tokens.data && tokens.data.data.length > 0 ? (
+                <ul className="m-0 list-none border-t border-rule p-0">
+                  {tokens.data.data.map((item) => (
+                    <li key={item.poolId} className="flex items-center justify-between gap-4 border-b border-rule py-3">
+                      <Link className="truncate font-bold text-ink no-underline hover:underline" href={`/tokens/${item.poolId}`}>
+                        {item.name ?? "Unnamed"}{" "}
+                        <span className="font-mono text-xs text-ink-muted">${item.symbol ?? "—"}</span>
+                      </Link>
+                      <span className="font-mono text-xs text-ink-muted">{item.status}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="border border-rule bg-raised p-6 text-center text-sm text-ink-muted">
+                  No confirmed launches from this wallet yet.
+                </p>
+              )}
+            </section>
+
+            <section aria-labelledby="profile-streams">
+              <h2 className="text-[clamp(1.4rem,3vw,2rem)]" id="profile-streams">
+                Revenue streams ({streams.data?.length ?? 0})
+              </h2>
+              {streams.data && streams.data.length > 0 ? (
+                <ul className="m-0 list-none border-t border-rule p-0 font-mono text-xs">
+                  {streams.data.map((stream) => (
+                    <li key={stream.pool_id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 border-b border-rule py-2">
+                      <Link className="truncate underline" href={`/tokens/${stream.pool_id}`}>
+                        {stream.name ?? stream.token}
+                      </Link>
+                      <span>
+                        {formatCompactEth(stream.creator_revenue_total, 4)} + path{" "}
+                        {formatCompactEth(stream.creator_path_revenue_total, 4)} ETH
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="border border-rule bg-raised p-6 text-center text-sm text-ink-muted">
+                  No RevenueNFTs currently held.
+                </p>
+              )}
+              <p className="mt-3 text-xs text-ink-muted">
+                Lifetime totals — open a pool for live claimable ledgers and claims.
+              </p>
+            </section>
           </div>
-        ) : (
-          <p className="border border-rule p-8 text-center text-ink-muted">
-            No launches are attributed to this profile.
-          </p>
-        )}
-      </section>
-      <section
-        className="border-b border-rule py-[clamp(2.5rem,6vw,5rem)]"
-        aria-labelledby="profile-activity"
-      >
-        <header className="flex items-end justify-between gap-4">
-          <h2
-            className="m-0 text-[clamp(1.8rem,4vw,3rem)]"
-            id="profile-activity"
+        </>
+      )}
+      {isSelf ? (
+        <EditProfileDialog
+          key={`${normalized}-${data?.username ?? "none"}`}
+          open={editing}
+          onClose={() => setEditing(false)}
+          wallet={normalized}
+          current={data}
+        />
+      ) : null}
+    </main>
+  );
+}
+
+function EditProfileDialog({
+  open,
+  onClose,
+  wallet,
+  current,
+}: {
+  open: boolean;
+  onClose: () => void;
+  wallet: string;
+  current?: { username: string | null; bio: string | null; imageUri: string | null } | null;
+}) {
+  const update = useUpdateProfile(wallet);
+  const [username, setUsername] = useState(current?.username ?? "");
+  const [bio, setBio] = useState(current?.bio ?? "");
+  const [imageUri, setImageUri] = useState(current?.imageUri ?? "");
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = () => {
+    setError(null);
+    update.mutate(
+      {
+        username: username.trim() ? username.trim() : null,
+        bio: bio.trim() ? bio.trim() : null,
+        imageUri: imageUri.trim() ? imageUri.trim() : null,
+      },
+      {
+        onSuccess: () => onClose(),
+        onError: (cause) => {
+          const apiError = cause as ApiError;
+          setError(
+            apiError.code === "USERNAME_TAKEN"
+              ? "That username is already taken."
+              : apiError.code === "VALIDATION_FAILED"
+                ? apiError.fieldErrors.map((field) => `${field.path}: ${field.message}`).join("; ") || "Validation failed."
+                : apiError.message,
+          );
+        },
+      },
+    );
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} title="Edit profile">
+      <div className="grid gap-4">
+        <InputField
+          id="profile-username"
+          label="Username"
+          hint="3–32 characters, A–Z / a–z / 0–9 / underscore; unique case-insensitive."
+          value={username}
+          maxLength={32}
+          onChange={(event) => setUsername(event.target.value)}
+        />
+        <TextareaField
+          id="profile-bio"
+          label="Bio"
+          hint="Up to 300 characters."
+          value={bio}
+          maxLength={300}
+          rows={3}
+          onChange={(event) => setBio(event.target.value)}
+        />
+        <InputField
+          id="profile-image"
+          label="Avatar URI"
+          optional
+          hint="ipfs:// or https:// — upload a logo below."
+          value={imageUri}
+          onChange={(event) => setImageUri(event.target.value)}
+        />
+        <div>
+          <input
+            id="profile-avatar-upload"
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            className="sr-only"
+            onChange={async (event) => {
+              const file = event.target.files?.[0];
+              if (!file) return;
+              setUploading(true);
+              try {
+                const { url } = await uploadLogoToIPFS(file);
+                setImageUri(url);
+              } catch (cause) {
+                setError(cause instanceof Error ? cause.message : "Upload failed.");
+              } finally {
+                setUploading(false);
+              }
+            }}
+          />
+          <label
+            htmlFor="profile-avatar-upload"
+            className="inline-flex min-h-10 cursor-pointer items-center rounded-sm border-2 border-ink px-3 text-sm font-bold"
           >
-            Related activity
-          </h2>
-          <span className="font-mono text-xs text-ink-muted">
-            Derived by launch attribution
-          </span>
-        </header>
-        {activity.length ? (
-          <ol className="mt-4 mb-0 list-none border-t border-rule p-0">
-            {activity.map((record) => (
-              <li
-                className="grid grid-cols-[6rem_1fr_auto] gap-4 border-b border-rule py-3 max-[48rem]:grid-cols-1 max-[48rem]:gap-1"
-                key={record.id}
-              >
-                <span className="font-mono text-xs font-bold text-accent-strong uppercase">
-                  {record.kind}
-                </span>
-                <Link
-                  href={`/tokens/${state.data.entities.launches[record.launchId]?.slug}`}
-                >
-                  {record.launchName}
-                </Link>
-                <time
-                  className="font-mono text-xs text-ink-muted"
-                  dateTime={record.occurredAt}
-                >
-                  {formatDemoUtc(record.occurredAt)}
-                </time>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <p className="border border-rule p-8 text-center text-ink-muted">
-            No related activity.
-          </p>
-        )}
-      </section>
-    </article>
+            {uploading ? "Uploading…" : "Upload avatar"}
+          </label>
+        </div>
+        <StatusRegion>
+          {error ? <StatusMessage tone="error">{error}</StatusMessage> : null}
+          {update.isError ? <StatusMessage tone="error">{(update.error as Error).message}</StatusMessage> : null}
+        </StatusRegion>
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button disabled={update.isPending} onClick={save}>
+            {update.isPending ? "Saving…" : "Save profile"}
+          </Button>
+        </div>
+      </div>
+    </Dialog>
   );
 }

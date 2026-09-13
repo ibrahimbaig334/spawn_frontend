@@ -1,4 +1,6 @@
-import { CORE_BAND_COUNT } from "@/protocol/constants";
+import { CORE_BAND_COUNT, MAX_FEE_FUNDED_BANDS } from "@/protocol/constants";
+import { bandRungMultiple } from "@/protocol/level-math";
+import { formatRungMultiple } from "@/lib/display";
 
 export interface MilestoneOverviewProps {
   completedMilestones: number;
@@ -7,11 +9,8 @@ export interface MilestoneOverviewProps {
   className?: string;
 }
 
-const MILESTONES = Array.from(
-  { length: CORE_BAND_COUNT },
-  (_, index) => index + 1,
-);
-const LANDMARKS = [1, 8, 16, 24, CORE_BAND_COUNT] as const;
+const MILESTONES = Array.from({ length: CORE_BAND_COUNT }, (_, index) => index + 1);
+const LANDMARKS = [1, 8, 16, CORE_BAND_COUNT] as const;
 
 function clamp(value: number, minimum: number, maximum: number): number {
   if (!Number.isFinite(value)) return minimum;
@@ -26,15 +25,15 @@ export function MilestoneOverview({
 }: MilestoneOverviewProps) {
   const completed = Math.floor(clamp(completedMilestones, 0, CORE_BAND_COUNT));
   const partial =
-    completed === CORE_BAND_COUNT
-      ? 0
-      : clamp(progressBps, 0, 10_000) / 10_000;
+    completed === CORE_BAND_COUNT ? 0 : clamp(progressBps, 0, 10_000) / 10_000;
   const next = Math.min(completed + 1, CORE_BAND_COUNT);
   const progressValue = completed + partial;
   const summary =
     completed === CORE_BAND_COUNT
-      ? `All ${CORE_BAND_COUNT} core bands harvested`
-      : `${completed} of ${CORE_BAND_COUNT} bands harvested. Band ${next} is next.`;
+      ? `All ${CORE_BAND_COUNT} core bands harvested — fee-funded extensions continue above.`
+      : `${completed} of ${CORE_BAND_COUNT} core bands harvested (top ≈ ${formatRungMultiple(
+          bandRungMultiple(CORE_BAND_COUNT - 1),
+        )} graduation). Band ${next} is next.`;
 
   return (
     <figure
@@ -64,7 +63,7 @@ export function MilestoneOverview({
       </progress>
 
       <div
-        className="grid h-9 grid-cols-[repeat(30,minmax(3px,1fr))] gap-[3px] max-[34rem]:h-7 max-[34rem]:gap-0.5"
+        className="grid h-9 grid-cols-[repeat(22,minmax(3px,1fr))] gap-[3px] max-[34rem]:h-7 max-[34rem]:gap-0.5"
         aria-hidden="true"
       >
         {MILESTONES.map((number) => {
@@ -91,25 +90,21 @@ export function MilestoneOverview({
       </div>
 
       <ol
-        className="mt-2.5 flex list-none justify-between p-0 text-[0.6875rem] [&_li]:grid [&_li]:gap-0.5 [&_li:not(:first-child):not(:last-child)]:text-center [&_li:last-child]:text-right max-[34rem]:[&_li:nth-child(2)]:hidden max-[34rem]:[&_li:nth-child(4)]:hidden"
+        className="mt-2.5 flex list-none justify-between p-0 text-[0.6875rem] [&_li]:grid [&_li]:gap-0.5 [&_li:not(:first-child):not(:last-child)]:text-center [&_li:last-child]:text-right max-[34rem]:[&_li:nth-child(2)]:hidden"
         aria-label="Milestone landmarks"
       >
         {LANDMARKS.map((number) => (
           <li key={number}>
             <span className="font-bold">Band {number}</span>
             <small className="text-inherit text-ink-muted">
-              {number === 1
-                ? "1.25x"
-                : number === 8
-                  ? "5x"
-                  : number === 16
-                    ? "36x"
-                    : number === 24
-                      ? "265x"
-                      : "800x"}
+              {formatRungMultiple(bandRungMultiple(number - 1))}
             </small>
           </li>
         ))}
+        <li>
+          <span className="font-bold">+{MAX_FEE_FUNDED_BANDS} ext.</span>
+          <small className="text-inherit text-ink-muted">fee-funded</small>
+        </li>
       </ol>
     </figure>
   );

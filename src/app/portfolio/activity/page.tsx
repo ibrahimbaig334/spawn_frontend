@@ -1,10 +1,10 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import { PortfolioActivity } from "@/components/portfolio/portfolio-activity";
 
 export const metadata: Metadata = {
-  title: "Demo account activity",
+  title: "Activity",
   description:
-    "Inspect deterministic fixture and browser-local ledger entries for the Spawn demonstration account.",
+    "Your swaps across watched and created pools, plus every launch you submitted.",
 };
 
 export default function PortfolioActivityPage() {

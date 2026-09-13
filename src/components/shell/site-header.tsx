@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ThemeToggle } from "./theme-toggle";
+import { WalletButton } from "./wallet-button";
 
 const PAGE_WIDTH =
   "mx-auto w-full max-w-measure px-[max(1rem,calc((100vw-80rem)/2))]";
@@ -14,6 +15,7 @@ const navigation = [
   { href: "/tokens", label: "Tokens" },
   { href: "/create", label: "Create" },
   { href: "/portfolio", label: "Portfolio" },
+  { href: "/protocol", label: "Protocol" },
 ] as const;
 
 function isActive(pathname: string, href: string): boolean {
@@ -40,9 +42,9 @@ function SearchForm({
         className="absolute -m-px size-px overflow-hidden border-0 p-0 whitespace-nowrap [clip:rect(0,0,0,0)]"
         htmlFor={id}
       >
-        Search demo tokens
+        Search tokens
       </label>
-      <input id={id} name="q" type="search" placeholder="Search tokens" />
+      <input id={id} name="q" type="search" placeholder="Search name or symbol" />
       <button type="submit">Search</button>
     </form>
   );
@@ -132,6 +134,9 @@ export function SiteHeader() {
           id="header-token-query"
         />
           <div className="flex items-center justify-end gap-2 max-[60rem]:col-start-3 max-[60rem]:row-start-1 max-[36rem]:ml-auto">
+            <div className="max-[36rem]:hidden">
+              <WalletButton />
+            </div>
             <ThemeToggle />
             <button
               ref={triggerRef}
@@ -196,14 +201,16 @@ export function SiteHeader() {
                 </Link>
               ))}
             </nav>
+            <div className="mt-6">
+              <WalletButton />
+            </div>
             <SearchForm
               className={[SEARCH, "mt-6"].join(" ")}
               id="mobile-token-query"
               onSubmit={() => close(false)}
             />
             <p className="mt-8 font-mono text-[0.68rem] font-semibold leading-6 text-ink-muted uppercase">
-              Fixed demonstration data · Browser-local interactions · No
-              connected transaction
+              Live Base mainnet data · On-chain trades &amp; launches via your wallet
             </p>
           </div>
         </div>

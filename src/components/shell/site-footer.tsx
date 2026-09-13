@@ -4,6 +4,7 @@ const productLinks = [
   ["Tokens", "/tokens"],
   ["Create", "/create"],
   ["Portfolio", "/portfolio"],
+  ["Protocol", "/protocol"],
 ] as const;
 
 export function SiteFooter() {
@@ -19,8 +20,8 @@ export function SiteFooter() {
             Spawn
           </Link>
           <p>
-            A milestone-based token launch protocol concept with terms declared
-            before activity begins.
+            A milestone-based token launch protocol: bonding curve to graduated
+            market, with creator revenue streams paid on fixed public terms.
           </p>
         </div>
         <nav
@@ -42,8 +43,8 @@ export function SiteFooter() {
           <Link href="/#risks">Risks</Link>
         </nav>
         <p className="text-[0.82rem]">
-          Fixed demonstration data. No wallet, contract, market feed, audit,
-          deployment, or transaction is connected or claimed.
+          Trading and launching execute directly against the protocol contracts
+          on Base from your own wallet. Nothing here is financial advice.
         </p>
       </div>
     </footer>

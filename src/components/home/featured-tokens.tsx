@@ -1,99 +1,117 @@
+"use client";
+
 import Link from "next/link";
-import { createSeedState } from "@/data/mock-seed";
-import {
-  deriveFdvEth,
-  derivePhaseLabel,
-  selectLaunches,
-} from "@/domain/selectors";
-import { formatEth } from "@/lib/format";
+import { useFeaturedTokens, useTokenList } from "@/lib/queries";
+import { formatCompactEth, relativeTime } from "@/lib/display";
+import { formatSubscriptPrice } from "@/lib/format";
+import { ApiError } from "@/lib/api/client";
+
+function formatSubscript(value: string): string {
+  return formatSubscriptPrice(value);
+}
 
 export function FeaturedTokens() {
-  const state = createSeedState();
-  const launches = selectLaunches(state).slice(0, 3);
+  const featured = useFeaturedTokens();
+  const newest = useTokenList({ sort: "newest", limit: 6, phase: "bonding" });
+
+  const rows = (featured.data ?? []).map((f) => ({
+    poolId: f.pool_id,
+    name: f.name ?? "Unnamed",
+    symbol: f.symbol ?? "—",
+    status: f.status,
+    volume: f.daily_volume_eth,
+    total: f.total_volume_eth,
+  }));
 
   return (
-    <section
-      className="border-b border-rule bg-raised px-[max(1rem,calc((100vw-80rem)/2))] py-[clamp(4rem,8vw,7rem)] print:px-0"
-      aria-labelledby="featured-title"
-    >
-      <div className="grid grid-cols-[minmax(18rem,1fr)_minmax(16rem,.55fr)_auto] items-end gap-x-[clamp(2rem,5vw,5rem)] gap-y-6 pb-8 max-[64rem]:grid-cols-2 max-[42rem]:grid-cols-1">
+    <section className={`${PAGE} border-b border-rule py-[clamp(3rem,7vw,6rem)]`} aria-labelledby="featured-title">
+      <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="m-0 font-mono text-xs font-bold tracking-[0.08em] text-accent uppercase">
-            Featured simulated tokens
-          </p>
-          <h2
-            className="mt-2 mb-0 max-w-[15ch] text-[clamp(2rem,4.5vw,4.25rem)] leading-[0.97] tracking-[-0.045em]"
-            id="featured-title"
-          >
-            Inspect the schedule behind each market.
+          <p className={EYEBROW}>Live markets</p>
+          <h2 className="m-0 text-[clamp(1.8rem,4vw,3rem)]" id="featured-title">
+            Trending on Spawn
           </h2>
         </div>
-        <p className="m-0 text-ink-muted">
-          Deterministic fixtures illustrate distinct lifecycle stages of the
-          same protocol mechanics. They are not market observations.
-        </p>
-        <Link
-          className="min-h-target whitespace-nowrap font-bold underline decoration-[0.1em] underline-offset-4 max-[64rem]:col-start-1 max-[42rem]:col-auto"
-          href="/tokens"
-        >
-          View all tokens
+        <Link className="font-bold text-ink underline-offset-4 hover:underline" href="/tokens">
+          Browse all pools →
         </Link>
-      </div>
-      <div className="border-t-2 border-ink">
-        {launches.map((launch) => (
-          <article
-            className="grid min-w-0 grid-cols-[minmax(15rem,.8fr)_minmax(24rem,1.4fr)_auto] items-center gap-x-8 gap-y-4 border-b border-rule py-5 max-[64rem]:grid-cols-[1fr_auto] max-[42rem]:grid-cols-1"
-            key={launch.poolId}
-          >
-            <div className="flex min-w-0 items-center gap-3.5">
-              <span
-                className="grid size-target shrink-0 place-items-center border border-ink font-mono text-xs font-bold text-accent-strong"
-                aria-hidden="true"
+      </header>
+
+      {featured.isError ? (
+        <p className="mt-6 text-sm text-ink-muted" role="status">
+          {featured.error instanceof ApiError && featured.error.code === "MANIFEST_NOT_SYNCED"
+            ? "No pools yet — the protocol is waiting for its deployment manifest."
+            : "Featured data unavailable right now."}
+        </p>
+      ) : rows.length > 0 ? (
+        <ol className="mt-6 grid list-none gap-4 p-0 md:grid-cols-3">
+          {rows.map((row, index) => (
+            <li key={row.poolId}>
+              <Link
+                href={`/tokens/${row.poolId}`}
+                className="grid gap-3 rounded-lg border-2 border-ink bg-carbon p-5 text-[#e9e7e0] no-underline transition-transform hover:-translate-y-1"
               >
-                {launch.symbol.slice(0, 2)}
-              </span>
-              <div>
-                <h3 className="m-0 text-lg">
-                  <Link
-                    className="underline-offset-4"
-                    href={`/tokens/${launch.slug}`}
-                  >
-                    {launch.name}
-                  </Link>
-                </h3>
-                <p className="mt-1 mb-0 text-xs text-ink-muted">
-                  ${launch.symbol} · ${launch.token}
-                </p>
-              </div>
-            </div>
-            <dl className="m-0 grid grid-cols-4 max-[64rem]:col-span-full max-[64rem]:row-start-2 max-[42rem]:col-auto max-[42rem]:row-auto max-[42rem]:grid-cols-2 [&>div]:min-w-0 [&>div]:px-3 max-[42rem]:[&>div]:py-2.5 max-[42rem]:[&>div]:px-0 [&>div+div]:border-l [&>div+div]:border-rule max-[42rem]:[&>div+div]:border-l-0 max-[42rem]:[&>div:nth-child(even)]:border-l max-[42rem]:[&>div:nth-child(even)]:pl-3 [&_dt]:text-[0.68rem] [&_dt]:text-ink-muted [&_dd]:mt-1 [&_dd]:mb-0 [&_dd]:overflow-wrap-anywhere [&_dd]:font-mono [&_dd]:text-xs [&_dd]:font-semibold">
-              <div>
-                <dt>Phase</dt>
-                <dd>{derivePhaseLabel(launch)}</dd>
-              </div>
-              <div>
-                <dt>FDV</dt>
-                <dd>{formatEth(deriveFdvEth(launch), 0)}</dd>
-              </div>
-              <div>
-                <dt>Harvested</dt>
-                <dd>{launch.completedMilestones} milestones</dd>
-              </div>
-              <div>
-                <dt>Fee</dt>
-                <dd>1% static</dd>
-              </div>
-            </dl>
-            <Link
-              className="inline-flex min-h-target items-center gap-2 whitespace-nowrap font-bold underline-offset-4 max-[42rem]:justify-self-start"
-              href={`/tokens/${launch.slug}`}
-              aria-label={`Inspect ${launch.name}`}
-            >
-              Inspect token <span aria-hidden="true">→</span>
+                <span className="flex items-center justify-between">
+                  <span className="font-mono text-[0.68rem] font-black uppercase text-[#f5c518]">
+                    #{index + 1} · {row.status}
+                  </span>
+                  <span className="font-mono text-[0.68rem] text-[#e9e7e0]/60">
+                    {row.volume ? formatCompactEth(row.volume) : "0"} ETH / 24h
+                  </span>
+                </span>
+                <span className="text-lg font-black">{row.name}</span>
+                <span className="font-mono text-sm text-[#e9e7e0]/70">${row.symbol}</span>
+                <span className="font-mono text-xs text-[#e9e7e0]/60">
+                  lifetime volume {row.total ? formatCompactEth(row.total) : "0"} ETH
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+
+      {!featured.isError && rows.length === 0 && newest.data && newest.data.data.length > 0 ? (
+        <ol className="mt-6 grid list-none gap-4 p-0 md:grid-cols-3">
+          {newest.data.data.slice(0, 3).map((item) => (
+            <li key={item.poolId}>
+              <Link
+                href={`/tokens/${item.poolId}`}
+                className="grid gap-3 rounded-lg border-2 border-ink bg-carbon p-5 text-[#e9e7e0] no-underline transition-transform hover:-translate-y-1"
+              >
+                <span className="flex items-center justify-between">
+                  <span className="font-mono text-[0.68rem] font-black uppercase text-[#f5c518]">
+                    new · {item.status}
+                  </span>
+                  <span className="font-mono text-[0.68rem] text-[#e9e7e0]/60">{relativeTime(item.launchTime)}</span>
+                </span>
+                <span className="text-lg font-black">{item.name ?? "Unnamed"}</span>
+                <span className="font-mono text-xs text-[#e9e7e0]/70">
+                  {item.priceEth ? `${formatSubscript(item.priceEth)} ETH` : "—"} · FDV{" "}
+                  {item.fdvEthWei ? `${formatCompactEth(item.fdvEthWei)} ETH` : "—"}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+
+      {!featured.isError && rows.length === 0 && !newest.isPending && (newest.data?.data.length ?? 0) === 0 ? (
+        <div className="mt-6 rounded-lg border-2 border-dashed border-rule p-10 text-center">
+          <p className="m-0 font-bold text-ink">No launches yet.</p>
+          <p className="mt-1 text-sm text-ink-muted">
+            The first token on the protocol will appear here the moment it confirms.{" "}
+            <Link className="underline" href="/create">
+              Be the first
             </Link>
-          </article>
-        ))}
-      </div>
+            .
+          </p>
+        </div>
+      ) : null}
     </section>
   );
 }
+
+const PAGE =
+  "mx-auto w-full max-w-measure px-[max(1rem,calc((100vw-80rem)/2))]";
+const EYEBROW =
+  "m-0 font-mono text-[0.68rem] font-bold uppercase tracking-[0.08em] text-accent-strong";

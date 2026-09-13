@@ -3,17 +3,16 @@ import { StatusPage, STATUS_LINK_CLASS } from "@/components/ui/status-page";
 
 export default function NotFound() {
   return (
-    <StatusPage
-      label="404 / Page not found"
-      title="That page is not part of this concept."
-    >
-      <p>
-        Return to the Spawn overview to review the demonstration terms and
-        risks.
-      </p>
-      <Link className={STATUS_LINK_CLASS} href="/">
-        Return to the overview
-      </Link>
+    <StatusPage label="404 / Page not found" title="That page does not exist.">
+      <p>Browse live markets or launch a token on Spawn.</p>
+      <div className="flex gap-4">
+        <Link className={STATUS_LINK_CLASS} href="/tokens">
+          Browse tokens
+        </Link>
+        <Link className={STATUS_LINK_CLASS} href="/create">
+          Create a launch
+        </Link>
+      </div>
     </StatusPage>
   );
 }

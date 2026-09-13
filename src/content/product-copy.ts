@@ -1,14 +1,11 @@
-export const DEMO_DISCLOSURE =
-  "Local protocol simulation. Values and interactions are stored in this browser. No wallet, contract, market feed, or transaction is connected.";
-
 export const PRODUCT_COPY = {
-  heroEyebrow: "Spawn / milestone launch protocol",
+  heroEyebrow: "Spawn / milestone launch protocol · live on Base",
   heroTitle: "Public terms before market momentum.",
   heroBody:
-    "Spawn launches tokens on a bonding curve that graduates into a protocol-owned milestone ladder — every crossed band pays the creator, the selected payout plugins, and the protocol, on terms signed at launch.",
-  heroExplore: "Explore simulated tokens",
+    "Spawn launches tokens on a Uniswap v4 bonding curve that graduates into a protocol-owned milestone ladder — every crossed band pays the creator, the selected payout plugins, and the protocol, on terms fixed at launch.",
+  heroExplore: "Explore live markets",
   creatorCta: "Build a launch",
-  sectionHow: "One pool. Three phases. Terms signed up front.",
+  sectionHow: "One pool. Three phases. Terms fixed at launch.",
   closingTitle: "Launch on public terms. Climb band by band.",
 } as const;
 

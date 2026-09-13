@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import { LaunchConfigurator } from "@/components/launch/launch-configurator";
 
 export const metadata: Metadata = {
-  title: "Create a demo launch",
+  title: "Launch a token",
   description:
-    "Configure and save a deterministic browser-local Spawn launch. No wallet, contract, or transaction is connected.",
+    "Prepare, predict and launch a Spawn token — relayed by the protocol operator or sent directly from your wallet.",
 };
 
 export default function CreatePage() {

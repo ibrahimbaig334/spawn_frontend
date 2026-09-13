@@ -7,9 +7,9 @@ import { LandingHero } from "@/components/home/landing-hero";
 import { RiskFaq } from "@/components/home/risk-faq";
 
 export const metadata: Metadata = {
-  title: "Milestone-based token launch protocol concept",
+  title: "Milestone-based token launchpad on Base",
   description:
-    "Explore a professional, deterministic concept for token launches governed by public price targets and declared proceeds allocation.",
+    "Launch and trade milestone-backed tokens: a Uniswap v4 bonding curve that graduates into a protocol-owned sell ladder paying creators, plugins, and the protocol on fixed terms.",
 };
 
 export default function HomePage() {

@@ -1,5 +1,5 @@
-import type { SVGProps } from "react";
-import type { LaunchMetadata } from "@/services/launchpad-client";
+﻿import type { SVGProps } from "react";
+import type { TokenSocials } from "@/lib/api/dto";
 
 type IconProps = SVGProps<SVGSVGElement>;
 
@@ -74,14 +74,14 @@ export function DiscordIcon(props: IconProps) {
 }
 
 export interface SocialLink {
-  key: keyof NonNullable<LaunchMetadata>["socials"];
+  key: keyof TokenSocials;
   label: string;
   href: string;
 }
 
 /** Normalized, safe hrefs for a launch's socials (http(s) only). */
 export function socialLinks(
-  socials: LaunchMetadata["socials"] | undefined,
+  socials: TokenSocials | undefined,
 ): SocialLink[] {
   if (!socials) return [];
   const entries: Array<[SocialLink["key"], string]> = [

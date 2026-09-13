@@ -36,14 +36,14 @@ export function LandingHero() {
           </Link>
         </div>
         <p className="mt-8 max-w-xl font-mono text-xs font-bold leading-5 tracking-[0.08em] text-ink-muted uppercase">
-          Protocol simulation · No wallet connected · Static 1% fee
+          Uniswap v4 on Base · Connect a wallet to trade or launch · Static 1% fee
         </p>
       </div>
       <div className="grid max-w-[46rem] gap-6 border border-ink bg-raised p-[clamp(1rem,2.5vw,1.75rem)] print:break-inside-avoid">
         <div className="flex justify-between gap-4 border-b border-rule pb-4 max-[42rem]:items-start max-[42rem]:flex-col">
           <p className={EYEBROW}>Protocol schedule / fixed example</p>
           <span className="font-mono text-xs font-bold leading-5">
-            Band 08 of 30
+            Band 08 of 22
           </span>
         </div>
         <MilestoneOverview
@@ -54,11 +54,11 @@ export function LandingHero() {
         <dl className="m-0 grid grid-cols-3 border-y border-rule max-[42rem]:grid-cols-1 [&>div]:min-w-0 [&>div]:px-2.5 [&>div]:py-3.5 [&>div+div]:border-l [&>div+div]:border-rule max-[42rem]:[&>div+div]:border-t max-[42rem]:[&>div+div]:border-l-0 [&_dt]:text-xs [&_dt]:text-ink-muted [&_dd]:mt-1 [&_dd]:mb-0 [&_dd]:overflow-wrap-anywhere [&_dd]:font-mono [&_dd]:text-[0.82rem] [&_dd]:font-bold">
           <div>
             <dt>Opening valuation</dt>
-            <dd>125 ETH FDV</dd>
+            <dd>2 ETH FDV</dd>
           </div>
           <div>
             <dt>Graduation at</dt>
-            <dd>2x (level +6931)</dd>
+            <dd>≈4x (level +13,862)</dd>
           </div>
           <div>
             <dt>Trading fee</dt>

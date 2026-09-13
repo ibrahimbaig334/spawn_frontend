@@ -1,319 +1,402 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { useDemo } from "@/state/use-demo";
-import { selectEthBalance, selectTokenBalance } from "@/domain/selectors";
-import { Dialog } from "@/components/ui/dialog";
-import type { LaunchRecord, TradePreview, TradeSide } from "@/services/launchpad-client";
-import { deriveGraduationNext, derivePhaseLabel } from "@/domain/selectors";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { formatEther, parseEther, erc20Abi, type Address } from "viem";
+import { Button, Dialog, SelectField, StatusMessage, StatusRegion } from "@/components/ui";
+import { qk, usePrice, useQuote } from "@/lib/queries";
+import { useWallet } from "@/lib/chain/wallet";
+import { useProtocol } from "@/lib/chain/protocol-context";
+import { executeSwap } from "@/lib/chain/trades";
+import { applySlippBps, formatCompactEth, wei } from "@/lib/display";
+import { formatSubscriptPrice, truncateDecimals } from "@/lib/format";
+import { APP_ENV, explorerTx } from "@/lib/env";
+import type { TokenStatus } from "@/lib/api/dto";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-interface TradeTicketProps {
-  launch: LaunchRecord;
+const SLIPPAGE_OPTIONS = [50, 100, 300] as const;
+
+type Side = "buy" | "sell";
+
+export interface TradeTicketProps {
+  tokenRef: string;
+  token: Address;
+  symbol: string;
+  status: TokenStatus;
+  farLevel: number;
 }
-type Phase = "idle" | "previewing" | "ready" | "submitting" | "success";
-const BUTTON =
-  "min-h-target cursor-pointer border border-rule bg-raised px-3.5 py-2.5 font-bold text-ink disabled:cursor-not-allowed disabled:opacity-55";
-const GRID =
-  "my-3 grid grid-cols-2 gap-px bg-rule max-[25rem]:grid-cols-1 [&>div]:min-w-0 [&>div]:bg-raised [&>div]:p-3 [&_dt]:text-xs [&_dt]:text-ink-muted [&_dd]:mt-1 [&_dd]:mb-0 [&_dd]:overflow-wrap-anywhere [&_dd]:font-bold";
 
-export function TradeTicket({ launch }: TradeTicketProps) {
-  const { state, dispatch, client } = useDemo();
-  const [side, setSide] = useState<TradeSide>("buy");
-  const [amounts, setAmounts] = useState({ buy: "1", sell: "100" });
-  const [preview, setPreview] = useState<TradePreview | null>(null);
-  const [phase, setPhase] = useState<Phase>("idle");
-  const [error, setError] = useState("");
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [receipt, setReceipt] = useState("");
-  const submitLock = useRef(false);
-  const confirmRef = useRef<HTMLButtonElement>(null);
-  const ethBalance = selectEthBalance(state);
-  const tokenBalance = selectTokenBalance(state, launch.poolId);
-  const amount = amounts[side];
-  const graduationNext = deriveGraduationNext(launch);
-  const phaseLabel = derivePhaseLabel(launch);
+function humanPrice(priceEth: string | null): string {
+  if (!priceEth) return "—";
+  return `${formatSubscriptPrice(priceEth)} ETH`;
+}
 
-  async function updatePreview(
-    nextSide = side,
-    nextAmount = amounts[nextSide],
-  ) {
-    setSide(nextSide);
-    setAmounts((current) => ({ ...current, [nextSide]: nextAmount }));
-    setError("");
-    setReceipt("");
-    setPhase("previewing");
+export function TradeTicket({ tokenRef, token, symbol, status, farLevel }: TradeTicketProps) {
+  const wallet = useWallet();
+  const protocol = useProtocol();
+  const queryClient = useQueryClient();
+  const [side, setSide] = useState<Side>("buy");
+  const [amountText, setAmountText] = useState("");
+  const [slippageBps, setSlippageBps] = useState<number>(100);
+  const [confirming, setConfirming] = useState(false);
+  const [phase, setPhase] = useState<"idle" | "approving" | "submitting" | "pending" | "done">("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [txHash, setTxHash] = useState<string | null>(null);
+
+  const price = usePrice(tokenRef, 8_000);
+  const graduationNext =
+    status === "bonding" && !!price.data && price.data.level >= farLevel - 1;
+
+  const amountInWei = useMemo(() => {
     try {
-      const value = await client.previewTrade(launch, {
-        side: nextSide,
-        amount: nextAmount,
+      return parseEther(amountText || "0");
+    } catch {
+      return null;
+    }
+  }, [amountText]);
+
+  const amountValid = amountInWei !== null && amountInWei > 0n;
+
+  const quote = useQuote(
+    tokenRef,
+    side === "buy" ? "BUY" : "SELL",
+    amountInWei !== null ? amountInWei.toString() : "0",
+    amountValid,
+  );
+
+  // Balances: ETH from wallet context; token balance from chain (authoritative).
+  const tokenBalance = useQuery({
+    queryKey: ["token-balance", token, wallet.address],
+    queryFn: async () => {
+      if (!wallet.address) return 0n;
+      return (await wallet.publicClient.readContract({
+        address: token,
+        abi: erc20Abi,
+        functionName: "balanceOf",
+        args: [wallet.address],
+      })) as bigint;
+    },
+    enabled: Boolean(wallet.address),
+    refetchInterval: 8_000,
+  });
+
+  const ethBalanceWei = wallet.ethBalance ? parseEther(wallet.ethBalance) : 0n;
+  const balance = side === "buy" ? ethBalanceWei : wei(tokenBalance.data?.toString());
+  const balanceLabel = side === "buy" ? `${truncateDecimals(wallet.ethBalance ?? "0")} ETH` : `${truncateDecimals(formatEther(balance))} ${symbol}`;
+  const insufficient = amountValid && BigInt(amountInWei ?? 0n) > balance;
+
+  const reset = useCallback(() => {
+    setPhase("idle");
+    setError(null);
+    setTxHash(null);
+  }, []);
+
+  async function submit() {
+    const addrs = protocol.addresses;
+    if (!wallet.address || !wallet.walletClient || amountInWei === null || !quote.data || !addrs) return;
+    if (!addrs.hook) {
+      setError("The protocol is not deployed on this chain yet.");
+      return;
+    }
+    reset();
+    setConfirming(false);
+    const amountOut = wei(quote.data.amountOut);
+    const amountOutMinimum = applySlippBps(amountOut, slippageBps);
+    try {
+      setPhase(side === "sell" ? "approving" : "submitting");
+      const hash = await executeSwap({
+        token,
+        hook: addrs.hook as Address,
+        direction: side,
+        amountIn: amountInWei,
+        amountOutMinimum,
+        walletClient: wallet.walletClient,
+        publicClient: wallet.publicClient,
+        account: wallet.address,
+        routerAddress: APP_ENV.universalRouterAddress as Address,
+        multicall3: addrs.multicall3 as Address,
       });
-      setPreview(value);
-      setPhase("ready");
-    } catch (reason) {
-      setPreview(null);
+      setPhase("pending");
+      setTxHash(hash);
+      const receipt = await wallet.publicClient.waitForTransactionReceipt({
+        hash,
+        pollingInterval: 1_500,
+        timeout: 240_000,
+      });
+      if (receipt.status !== "success") {
+        setError("Transaction reverted on-chain (price moved or the hook rejected it). Re-quote and retry — do not pad slippage.");
+        setPhase("idle");
+      } else {
+        setPhase("done");
+        setAmountText("");
+        void queryClient.invalidateQueries({ queryKey: ["token-balance", token, wallet.address] });
+        void queryClient.invalidateQueries({ queryKey: qk.price(tokenRef) });
+        void queryClient.invalidateQueries({ queryKey: ["tokens", tokenRef] });
+      }
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Transaction failed.";
       setError(
-        reason instanceof Error
-          ? reason.message
-          : "A quote could not be prepared.",
+        /user rejected|denied|rejected|cancelled/i.test(message)
+          ? "You rejected the transaction in your wallet."
+          : message,
       );
       setPhase("idle");
     }
   }
 
-  function chooseSide(nextSide: TradeSide) {
-    setSide(nextSide);
-    setPreview(null);
-    setPhase("idle");
-    setReceipt("");
-    setError("");
-  }
+  // Auto-close success state
+  useEffect(() => {
+    if (phase !== "done") return;
+    const id = setTimeout(reset, 6_000);
+    return () => clearTimeout(id);
+  }, [phase, reset]);
 
-  function setBalanceShortcut() {
-    void updatePreview(
-      side,
-      side === "buy" ? ethBalance : tokenBalance,
-    );
-  }
-
-  async function submit() {
-    if (!preview || submitLock.current) return;
-    submitLock.current = true;
-    setPhase("submitting");
-    setError("");
-    try {
-      const result = await client.executeTrade(
-        launch,
-        { side, amount },
-        state.data.sequence + 1,
-      );
-      const receiptId = `sim_${launch.poolId}_${state.data.sequence + 1}`;
-      dispatch({
-        type: "apply-launch-update",
-        launch: result.launch,
-        events: result.events,
-        tokenBalance: result.tokenBalance,
-        ethBalance: result.ethBalance,
-      });
-      setReceipt(receiptId);
-      setPhase("success");
-      setDialogOpen(false);
-      setPreview(null);
-    } catch (reason) {
-      setError(
-        reason instanceof Error
-          ? reason.message
-          : "The trade could not be completed.",
-      );
-      setPhase("ready");
-    } finally {
-      submitLock.current = false;
-    }
-  }
+  const busy = phase === "approving" || phase === "submitting" || phase === "pending";
+  const quoteOut = quote.data ? wei(quote.data.amountOut) : null;
+  const effectiveQuote =
+    quoteOut !== null && amountValid
+      ? side === "buy"
+        ? `≈ ${formatCompactEth(quoteOut.toString(), 0)} ${symbol} for ${truncateDecimals(amountText)} ETH`
+        : `≈ ${truncateDecimals(formatEther(quoteOut))} ETH`
+      : null;
 
   return (
-    <section
-      className="mt-4 border-y-2 border-ink py-5 text-ink"
-      aria-labelledby={`trade-${launch.poolId}`}
-    >
-      <header className="flex items-baseline justify-between gap-4 max-[25rem]:items-start max-[25rem]:flex-col">
-        <h4 className="m-0 text-xl" id={`trade-${launch.poolId}`}>
-          Trade
-        </h4>
-        <span className="font-mono text-[0.68rem] font-bold tracking-[0.07em] text-ink-muted uppercase">
-          {phaseLabel} · 1% fee
-        </span>
-      </header>
-      {graduationNext && (
-        <p
-          className="mt-3 mb-0 border-l-[3px] border-accent bg-raised px-3 py-2 text-sm"
-          role="status"
-        >
-          <strong>Graduation on next trade.</strong> The curve top (2x the
-          opening valuation) is at hand — the next buy auto-graduates the pool:
-          curve burns, 40/55/5 splits, and the milestone ladder loads.
-        </p>
-      )}
-      <div
-        className="mt-4 flex [&_button+button]:border-l-0 [&_button[aria-pressed=true]]:border-ink [&_button[aria-pressed=true]]:bg-ink [&_button[aria-pressed=true]]:text-inverse"
-        role="group"
-        aria-label="Trade direction"
-      >
-        <button
-          className={BUTTON}
-          type="button"
-          aria-pressed={side === "buy"}
-          onClick={() => chooseSide("buy")}
-        >
-          Buy
-        </button>
-        <button
-          className={BUTTON}
-          type="button"
-          aria-pressed={side === "sell"}
-          onClick={() => chooseSide("sell")}
-        >
-          Sell
-        </button>
+    <section className="grid gap-4 rounded-lg border-2 border-ink bg-paper p-4" aria-label="Trade ticket">
+      <div className="grid grid-cols-2 gap-1 rounded-sm border-2 border-ink p-1" role="tablist" aria-label="Trade direction">
+        {(["buy", "sell"] as const).map((option) => (
+          <button
+            key={option}
+            role="tab"
+            aria-selected={side === option}
+            type="button"
+            className={[
+              "min-h-10 cursor-pointer rounded-sm border-0 py-2 text-sm font-black uppercase tracking-wide",
+              side === option
+                ? option === "buy"
+                  ? "bg-accent text-carbon"
+                  : "bg-error text-inverse"
+                : "bg-transparent text-ink-muted",
+            ].join(" ")}
+            onClick={() => {
+              setSide(option);
+              setAmountText("");
+              reset();
+            }}
+          >
+            {option === "buy" ? `Buy ${symbol}` : `Sell ${symbol}`}
+          </button>
+        ))}
       </div>
-      <label className="mt-4 grid gap-1.5">
-        <span className="text-sm font-bold">
-          Amount, {side === "buy" ? "ETH" : launch.symbol}
-        </span>
-        <input
-          className="min-h-target w-full border border-rule bg-raised px-3 py-2.5 text-ink"
-          inputMode="decimal"
-          value={amount}
-          onChange={(event) => {
-            setAmounts((current) => ({
-              ...current,
-              [side]: event.target.value,
-            }));
-            setPreview(null);
-            setPhase("idle");
-            setReceipt("");
-          }}
-          onBlur={() => void updatePreview()}
-          aria-describedby={`trade-note-${launch.poolId}`}
-        />
-      </label>
-      <div className="mt-2 flex items-center justify-between gap-3 text-xs text-ink-muted">
-        <span>
-          {side === "buy"
-            ? `Balance: ${Number(ethBalance).toFixed(4)} ETH`
-            : `Balance: ${Number(tokenBalance).toFixed(2)} ${launch.symbol}`}
-        </span>
-        <button
-          className="cursor-pointer border-0 bg-transparent p-1 font-bold text-ink underline underline-offset-4"
-          type="button"
-          onClick={setBalanceShortcut}
-        >
-          Use available balance
-        </button>
-      </div>
-      <p
-        className="mt-4 mb-0 border-l-4 border-focus bg-paper p-3 leading-snug"
-        id={`trade-note-${launch.poolId}`}
-      >
-        Simulation only. Buys pay the 1% fee in ETH, sells in token. Quotes are
-        single-swap — re-quote on errors rather than padding.
-      </p>
-      {error && (
-        <p className="mt-3 mb-0 font-bold text-error" role="alert">
-          {error}
-        </p>
-      )}
-      {preview && (
-        <div className="my-4" aria-live="polite">
-          <dl className={GRID}>
-            <div>
-              <dt>Estimated output</dt>
-              <dd>
-                {Number(preview.estimatedOutput).toFixed(2)}{" "}
-                {preview.outputUnit === "token" ? launch.symbol : "ETH"}
-              </dd>
-            </div>
-            <div>
-              <dt>Fee (1%, {preview.feeUnit === "ETH" ? "ETH" : "token"})</dt>
-              <dd>{Number(preview.feeAmount).toFixed(2)}</dd>
-            </div>
-            <div>
-              <dt>Level movement</dt>
-              <dd>
-                {preview.levelBefore} → {preview.levelAfter}
-              </dd>
-            </div>
-            <div>
-              <dt>Milestones completed</dt>
-              <dd>{preview.milestonesCompleted}</dd>
-            </div>
-          </dl>
+
+      <div className="grid gap-1.5">
+        <label className="flex items-baseline justify-between text-sm font-bold text-ink" htmlFor="trade-amount">
+          <span>{side === "buy" ? "Amount in ETH" : `Amount in ${symbol}`}</span>
+          <span className="font-mono text-xs font-semibold text-ink-muted">
+            Balance: {wallet.address ? balanceLabel : "—"}
+          </span>
+        </label>
+        <div className="flex items-stretch rounded-sm border-2 border-ink-muted bg-raised focus-within:border-focus">
+          <input
+            id="trade-amount"
+            inputMode="decimal"
+            autoComplete="off"
+            className="min-h-12 w-full min-w-0 border-0 bg-transparent px-3 text-lg font-bold text-ink outline-none"
+            placeholder="0.0"
+            type="text"
+            value={amountText}
+            onChange={(event) => setAmountText(event.target.value.replace(/[^0-9.]/g, ""))}
+          />
+          <button
+            className="mx-2 my-2 shrink-0 cursor-pointer rounded-sm border border-ink bg-transparent px-2 text-xs font-bold text-ink hover:bg-ink hover:text-inverse"
+            type="button"
+            onClick={() => {
+              if (side === "buy") {
+                setAmountText(formatEther((ethBalanceWei > 2_000_000_000_000_000n ? ethBalanceWei - 2_000_000_000_000_000n : 0n)));
+              } else {
+                setAmountText(formatEther(tokenBalance.data ?? 0n));
+              }
+            }}
+          >
+            MAX
+          </button>
         </div>
-      )}
-      <button
-        className="min-h-target w-full cursor-pointer border border-ink bg-ink px-4 py-2.5 font-bold text-inverse disabled:cursor-not-allowed disabled:opacity-55"
-        type="button"
-        disabled={phase === "previewing" || phase === "submitting"}
-        onClick={() => (preview ? setDialogOpen(true) : void updatePreview())}
-      >
-        {phase === "previewing"
-          ? "Quoting…"
-          : preview
-            ? "Review trade"
-            : "Get quote"}
-      </button>
-      {receipt && (
-        <p
-          className="mt-4 mb-0 border-l-4 border-focus bg-paper p-3 leading-snug"
-          role="status"
-        >
-          <strong>Trade recorded.</strong>
-          <br />
-          Receipt {receipt}. No transaction occurred.
+        {side === "buy" ? (
+          <div className="flex gap-1.5">
+            {["0.1", "0.25", "0.5", "1"].map((value) => (
+              <button
+                key={value}
+                type="button"
+                className="min-h-8 cursor-pointer rounded-sm border border-rule bg-transparent px-2 font-mono text-xs font-bold text-ink-muted hover:border-ink hover:text-ink"
+                onClick={() => setAmountText(value)}
+              >
+                {value} ETH
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      {amountValid && quote.isFetching ? (
+        <p className="font-mono text-xs text-ink-muted" role="status">Fetching on-chain quote…</p>
+      ) : amountValid && quote.isError ? (
+        <StatusMessage tone="error" title="Quote failed">
+          {(quote.error as Error).message}
+        </StatusMessage>
+      ) : quoteOut !== null ? (
+        <p className="font-mono text-sm font-bold text-ink">
+          You receive ≈{" "}
+          {side === "buy" ? (
+            <>
+              {formatCompactEth(quoteOut.toString(), 0)} {symbol}
+            </>
+          ) : (
+            <>{truncateDecimals(formatEther(quoteOut))} ETH</>
+          )}
         </p>
+      ) : null}
+
+      <SelectField
+        id={`trade-slippage-${side}`}
+        label="Slippage tolerance"
+        value={String(slippageBps)}
+        onChange={(event) => setSlippageBps(Number(event.target.value))}
+      >
+        {SLIPPAGE_OPTIONS.map((bps) => (
+          <option key={bps} value={bps}>
+            {bps / 100}%
+          </option>
+        ))}
+      </SelectField>
+
+      {graduationNext ? (
+        <StatusMessage tone="warning" title="Graduation on next trade">
+          The curve is full ({status}): this trade will trigger graduation into the
+          permanent market. The quote above already accounts for it.
+        </StatusMessage>
+      ) : null}
+
+      <StatusRegion>
+        {insufficient && !busy ? (
+          <StatusMessage tone="error" title="Insufficient balance">
+            {side === "buy" ? "Your ETH balance is below this amount." : `You hold less than this amount of ${symbol}.`}
+          </StatusMessage>
+        ) : null}
+        {error ? (
+          <StatusMessage tone="error" title="Trade failed" onDismiss={reset}>
+            {error}
+          </StatusMessage>
+        ) : null}
+        {phase === "approving" ? (
+          <StatusMessage tone="neutral" title="Approval">
+            Approve the router to spend your {symbol} (sell only), then confirm the swap.
+          </StatusMessage>
+        ) : null}
+        {phase === "pending" ? (
+          <StatusMessage tone="neutral" title="Transaction pending">
+            Waiting for confirmation{txHash ? (
+              <>
+                {" "}·{" "}
+                <a className="underline" href={explorerTx(txHash)} rel="noreferrer" target="_blank">
+                  view on explorer
+                </a>
+              </>
+            ) : null}
+          </StatusMessage>
+        ) : null}
+        {phase === "done" ? (
+          <StatusMessage tone="success" title={`${side === "buy" ? "Bought" : "Sold"} — confirmed`} onDismiss={reset}>
+            {effectiveQuote ?? "Your position updates within a few seconds."}
+            {txHash ? (
+              <>
+                {" "}
+                <a className="underline" href={explorerTx(txHash)} rel="noreferrer" target="_blank">
+                  Explorer receipt
+                </a>
+              </>
+            ) : null}
+          </StatusMessage>
+        ) : null}
+      </StatusRegion>
+
+      {!wallet.address ? (
+        <Button fullWidth onClick={() => void wallet.connect().catch((cause) => setError((cause as Error).message))}>
+          Connect wallet to trade
+        </Button>
+      ) : wallet.chainId !== wallet.targetChainId ? (
+        <Button fullWidth variant="danger" onClick={() => void wallet.switchToTargetChain().catch((cause) => setError((cause as Error).message))}>
+          Switch wallet to {wallet.targetChainId === 8453 ? "Base" : `chain ${wallet.targetChainId}`}
+        </Button>
+      ) : (
+        <Button
+          fullWidth
+          variant={side === "buy" ? "primary" : "danger"}
+          disabled={!amountValid || insufficient || busy || !quote.data || !protocol.addresses}
+          onClick={() => setConfirming(true)}
+        >
+          {busy
+            ? phase === "pending"
+              ? "Confirming on chain…"
+              : "Check your wallet…"
+            : `${side === "buy" ? "Buy" : "Sell"} ${symbol}`}
+        </Button>
       )}
 
+      <p className="m-0 font-mono text-[0.68rem] leading-4 text-ink-muted">
+        The 1% fee is protocol-owned — not a tip to LPs. Buys pay it in ETH, sells in {symbol}.
+        Quotes run the real hook simulation; re-quote after errors instead of raising slippage.
+      </p>
+
       <Dialog
-        open={dialogOpen && Boolean(preview)}
-        onClose={() => {
-          if (phase !== "submitting") setDialogOpen(false);
-        }}
-        title={`Review ${side}`}
-        description="Records a deterministic result in the local protocol simulation. No transaction will be created."
-        initialFocusRef={confirmRef}
-        footer={
-          <div className="flex w-full justify-end gap-2 max-[25rem]:items-stretch max-[25rem]:flex-col-reverse">
-            <button
-              className={BUTTON}
-              type="button"
-              disabled={phase === "submitting"}
-              onClick={() => setDialogOpen(false)}
-            >
-              Cancel
-            </button>
-            <button
-              className={`${BUTTON} border-ink bg-ink text-inverse`}
-              ref={confirmRef}
-              type="button"
-              disabled={phase === "submitting"}
-              onClick={() => void submit()}
-            >
-              {phase === "submitting" ? "Submitting…" : "Confirm trade"}
-            </button>
-          </div>
-        }
+        open={confirming}
+        title={`Confirm ${side} — ${amountText} ${side === "buy" ? "ETH" : symbol}`}
+        onClose={() => setConfirming(false)}
       >
-        {preview && (
-          <dl className={GRID}>
-            <div>
-              <dt>Input</dt>
-              <dd>
-                {Number(preview.inputAmount).toFixed(2)}{" "}
-                {preview.inputUnit === "token" ? launch.symbol : "ETH"}
+        <div className="grid gap-3">
+          <dl className="m-0 grid gap-1.5 text-sm">
+            <div className="flex justify-between">
+              <dt className="text-ink-muted">You pay</dt>
+              <dd className="m-0 font-mono font-bold">
+                {truncateDecimals(amountText)} {side === "buy" ? "ETH" : symbol}
               </dd>
             </div>
-            <div>
-              <dt>Estimated output</dt>
-              <dd>
-                {Number(preview.estimatedOutput).toFixed(2)}{" "}
-                {preview.outputUnit === "token" ? launch.symbol : "ETH"}
+            <div className="flex justify-between">
+              <dt className="text-ink-muted">You receive (quote)</dt>
+              <dd className="m-0 font-mono font-bold">
+                {quote.data
+                  ? side === "buy"
+                    ? `${formatCompactEth(quote.data.amountOut, 0)} ${symbol}`
+                    : `${truncateDecimals(formatEther(wei(quote.data.amountOut)))} ETH`
+                  : "—"}
               </dd>
             </div>
-            <div>
-              <dt>Fee</dt>
-              <dd>
-                {Number(preview.feeAmount).toFixed(2)}{" "}
-                {preview.feeUnit === "ETH" ? "ETH" : launch.symbol}
+            <div className="flex justify-between">
+              <dt className="text-ink-muted">Minimum after {slippageBps / 100}% slippage</dt>
+              <dd className="m-0 font-mono font-bold">
+                {quote.data
+                  ? side === "buy"
+                    ? `${formatCompactEth(applySlippBps(wei(quote.data.amountOut), slippageBps).toString(), 0)} ${symbol}`
+                    : `${truncateDecimals(formatEther(applySlippBps(wei(quote.data.amountOut), slippageBps)))} ETH`
+                  : "—"}
               </dd>
             </div>
-            <div>
-              <dt>Milestones completed</dt>
-              <dd>{preview.milestonesCompleted}</dd>
+            <div className="flex justify-between">
+              <dt className="text-ink-muted">Price</dt>
+              <dd className="m-0 font-mono font-bold">{humanPrice(price.data?.priceEth ?? null)} / {symbol}</dd>
             </div>
           </dl>
-        )}
+          {graduationNext ? (
+            <p className="m-0 rounded-sm border-2 border-protocol bg-raised p-2 text-xs font-bold text-ink">
+              This trade graduates the pool: the curve burns and the permanent market
+              (full-range + wall) is seeded. Proceed only if you want graduation now.
+            </p>
+          ) : null}
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setConfirming(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => void submit()}>{side === "buy" ? "Confirm buy" : "Confirm sell"}</Button>
+          </div>
+        </div>
       </Dialog>
     </section>
   );
 }
-
-export default TradeTicket;

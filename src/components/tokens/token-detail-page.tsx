@@ -32,6 +32,7 @@ import {
 } from "@/lib/chain/trades";
 import type { RevenueKind, TradeItem } from "@/lib/api/dto";
 import { ApiError } from "@/lib/api/client";
+import { resolveImageUrl } from "@/services/ipfs-client";
 import {
   formatCompactEth,
   formatLevel,
@@ -533,7 +534,7 @@ export function TokenDetailPage({ tokenRef }: { tokenRef: string }) {
           >
             {detail.imageUri ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={detail.imageUri} alt="" className="size-full object-cover" />
+              <img src={resolveImageUrl(detail.imageUri)} alt="" className="size-full object-cover" />
             ) : (
               (detail.symbol ?? "?").slice(0, 2)
             )}

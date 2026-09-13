@@ -39,6 +39,12 @@ export const APP_ENV = {
     process.env.NEXT_PUBLIC_EXPLORER_BASE_URL,
     "https://basescan.org",
   ),
+  /** Gateway used to display `ipfs://` images (uploads are pinned via the backend). */
+  ipfsGateway: required(
+    "NEXT_PUBLIC_IPFS_GATEWAY",
+    process.env.NEXT_PUBLIC_IPFS_GATEWAY,
+    "https://gateway.pinata.cloud/ipfs",
+  ),
 } as const;
 
 export function explorerTx(hash: string): string {

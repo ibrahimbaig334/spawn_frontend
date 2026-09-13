@@ -5,7 +5,7 @@ import { useState } from "react";
 import { Button, Dialog, InputField, StatusMessage, StatusRegion, TextareaField } from "@/components/ui";
 import { useProfile, useProfileTokens, useRevenueStreams, useUpdateProfile } from "@/lib/queries";
 import { useWallet } from "@/lib/chain/wallet";
-import { uploadLogoToIPFS } from "@/services/ipfs-client";
+import { resolveImageUrl, uploadLogoToIPFS } from "@/services/ipfs-client";
 import { formatCompactEth, formatUtc } from "@/lib/display";
 import { ApiError } from "@/lib/api/client";
 import { isAddress } from "viem";
@@ -38,7 +38,7 @@ export function ProfilePage({ walletAddress }: { walletAddress: string }) {
               <span className="grid size-20 shrink-0 place-items-center overflow-hidden rounded-full border-2 border-ink bg-raised font-mono text-xl font-black text-accent-strong">
                 {avatar ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={avatar} alt="" className="size-full object-cover" />
+                  <img src={resolveImageUrl(avatar)} alt="" className="size-full object-cover" />
                 ) : (
                   (display ?? normalized.slice(2, 4)).slice(0, 2).toUpperCase()
                 )}
@@ -216,8 +216,8 @@ function EditProfileDialog({
               if (!file) return;
               setUploading(true);
               try {
-                const { url } = await uploadLogoToIPFS(file);
-                setImageUri(url);
+                const { ipfsUri } = await uploadLogoToIPFS(file);
+                setImageUri(ipfsUri);
               } catch (cause) {
                 setError(cause instanceof Error ? cause.message : "Upload failed.");
               } finally {

@@ -6,7 +6,7 @@ import type { Hex } from "viem";
 import { formatEther } from "viem";
 import { Button, CheckboxField, InputField, SelectField, StatusMessage, StatusRegion, TextareaField } from "@/components/ui";
 import { useLogoDropzone } from "@/components/launch/token-card";
-import { uploadLogoToIPFS } from "@/services/ipfs-client";
+import { resolveImageUrl, uploadLogoToIPFS } from "@/services/ipfs-client";
 import { useProtocol } from "@/lib/chain/protocol-context";
 import { useWallet } from "@/lib/chain/wallet";
 import { useLaunchRecord, usePrepareLaunch, useRelayLaunch } from "@/lib/queries";
@@ -134,8 +134,8 @@ export function LaunchConfigurator() {
     setUploading(true);
     setUploadError(null);
     try {
-      const { url } = await uploadLogoToIPFS(file);
-      set("imageUri", url);
+      const { ipfsUri } = await uploadLogoToIPFS(file);
+      set("imageUri", ipfsUri);
     } catch (cause) {
       setUploadError(cause instanceof Error ? cause.message : "Upload failed.");
     } finally {
@@ -422,7 +422,7 @@ export function LaunchConfigurator() {
                 >
                   {draft.imageUri ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={draft.imageUri} alt="Uploaded logo" className="max-h-36 object-contain" />
+                    <img src={resolveImageUrl(draft.imageUri)} alt="Uploaded logo" className="max-h-36 object-contain" />
                   ) : uploading ? (
                     <span className="font-mono text-sm text-ink-muted">Uploading to IPFS…</span>
                   ) : (
@@ -756,7 +756,7 @@ export function LaunchConfigurator() {
             <div className="grid h-40 place-items-center overflow-hidden bg-[#14100d]">
               {draft.imageUri ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={draft.imageUri} alt="" className="h-full w-full object-cover" />
+                <img src={resolveImageUrl(draft.imageUri)} alt="" className="h-full w-full object-cover" />
               ) : (
                 <span className="font-mono text-sm text-[#e9e7e0]/50">preview</span>
               )}
